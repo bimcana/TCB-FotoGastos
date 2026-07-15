@@ -231,3 +231,24 @@ inpClient.value = get('clientId', '');
 inpCarpeta.value = get('carpetaRaiz', 'Gastos_NCF');
 inpClient.addEventListener('change', () => set('clientId', inpClient.value.trim()));
 inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.value.trim() || 'Gastos_NCF'); set('carpetaRaizId', null); });
+
+// Conexión a Google Drive (Task 9)
+import { initAuth, conectar, conectado, asegurarCarpeta } from './drive.js';
+
+document.getElementById('btn-conectar').addEventListener('click', async () => {
+  const clientId = get('clientId', '');
+  if (!clientId) return toast('Pega primero tu Client ID de Google');
+  try {
+    initAuth(clientId);
+    await conectar();
+    const raizId = await asegurarCarpeta(get('carpetaRaiz', 'Gastos_NCF'));
+    set('carpetaRaizId', raizId);
+    document.getElementById('drive-estado').textContent =
+      `Conectado ✓ — carpeta «${get('carpetaRaiz', 'Gastos_NCF')}» lista`;
+    document.getElementById('gastos-sub').textContent = 'Google Drive · conectado';
+    toast('Google Drive conectado');
+  } catch(e){
+    console.error(e);
+    toast('No se pudo conectar: ' + e.message);
+  }
+});
