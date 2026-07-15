@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { nombreCarpetaMes, siguienteNombre } from '../src/naming.js';
+import { nombreCarpetaMes, siguienteNombre, hoyISO } from '../src/naming.js';
 
 test('carpeta de junio 2025', () => {
   assert.equal(nombreCarpetaMes('2025-06-11'), '2025-06_Junio');
@@ -24,4 +24,11 @@ test('día 01: tercera factura', () => {
 });
 test('acepta .jpeg y mayúsculas en existentes', () => {
   assert.equal(siguienteNombre('2025-06-11', ['COMPRA_110.JPEG']), 'Compra_111.jpg');
+});
+test('hoyISO formatea una fecha dada', () => {
+  assert.equal(hoyISO(new Date(2025, 5, 1)), '2025-06-01');
+});
+test('correlativo de dos digitos (decima factura del dia)', () => {
+  const existentes = Array.from({length: 10}, (_, i) => `Compra_11${i}.jpg`);
+  assert.equal(siguienteNombre('2025-06-11', existentes), 'Compra_1110.jpg');
 });

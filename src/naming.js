@@ -17,7 +17,6 @@ export function siguienteNombre(fechaISO, existentes){
   return `Compra_${dia}${max + 1}.jpg`;
 }
 
-export function hoyISO(){
-  const d = new Date();
+export function hoyISO(d = new Date()){
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
