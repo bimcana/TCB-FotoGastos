@@ -55,7 +55,7 @@ export function detectarDocumento(srcCanvas, escala = 0.35){
     th = new cv.Mat();
     cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
     cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
-    // Umbral de Otsu: separa el papel (brillante) del fondo. INV para que el papel quede en blanco.
+    // Umbral de Otsu: separa el papel (brillante) del fondo. El papel queda en blanco (255) para findContours.
     cv.threshold(gray, th, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
     // Cierre morfológico: rellena huecos del texto para que el papel sea una sola mancha sólida.
     kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(9, 9));
