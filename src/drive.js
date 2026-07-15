@@ -50,6 +50,13 @@ export async function asegurarCarpeta(nombre, padreId = null){
   return creada.id;
 }
 
+export async function buscarCarpeta(nombre, padreId = null){
+  const filtroPadre = padreId ? ` and '${padreId}' in parents` : '';
+  const q = encodeURIComponent(`name='${nombre.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${filtroPadre}`);
+  const res = await api(`files?q=${q}&fields=files(id)&pageSize=1`);
+  return res.files.length ? res.files[0].id : null;
+}
+
 export async function listarNombres(carpetaId){
   const q = encodeURIComponent(`'${carpetaId}' in parents and trashed=false`);
   const res = await api(`files?q=${q}&fields=files(name)&pageSize=1000`);

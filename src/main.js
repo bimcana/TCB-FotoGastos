@@ -127,6 +127,10 @@ window.procesarYRevisar = procesarYRevisar;
 // Tarjeta de datos de la factura: OCR con Gemini + campos editables + validación + duplicado (Task 4)
 const CAMPOS_IDS = ['c-fecha', 'c-ncf', 'c-rnc', 'c-comercio', 'c-subtotal', 'c-itbis', 'c-total'];
 
+// Token de generación: descarta lecturas de Gemini obsoletas si el usuario re-procesa
+// (p. ej. ajusta esquinas) mientras una lectura previa sigue en vuelo.
+let genOCR = 0;
+
 function vaciarCampos(){
   CAMPOS_IDS.forEach(id => { document.getElementById(id).value = ''; });
   const banner = document.getElementById('dup-banner');
@@ -161,49 +165,61 @@ function okChip(txt){ return `<span class="chip ok"><span class="dot"></span>${t
 function warnChip(txt){ return `<span class="chip warn"><span class="dot"></span>${txt}</span>`; }
 
 async function leerDatosDeFactura(){
+  const miGen = ++genOCR;
   const key = get('geminiKey', '');
   const origen = document.getElementById('datos-origen');
   vaciarCampos();
+  // Reset del estado ANTES del await: si el usuario confirma durante la carga, no se
+  // suben metadatos de una factura anterior (riesgo de cumplimiento fiscal).
+  window.__datos = { origen: 'cargando' };
   if (!key || !window.__resultado?.canvasFinal){
     origen.hidden = false;
     origen.textContent = key ? 'sin imagen' : 'sin OCR (configura Gemini)';
     window.__datos = { origen: 'manual' };
-    await validarCampos();
+    await validarCampos(miGen);
     return;
   }
   origen.hidden = false; origen.textContent = 'Leyendo con Gemini…';
   try {
     const datos = await extraerDatos(window.__resultado.canvasFinal, key);
+    if (miGen !== genOCR) return; // llegó una lectura más nueva; descartar esta respuesta obsoleta
     window.__datos = { ...(datos || {}), origen: datos ? 'gemini' : 'manual' };
     if (datos) normalizarEnCampos(datos);
     origen.textContent = datos ? 'Gemini' : 'sin lectura';
   } catch(e){
+    if (miGen !== genOCR) return;
     console.error(e);
     toast('No se pudo leer con Gemini: ' + e.message);
     origen.textContent = 'error de lectura';
     window.__datos = { origen: 'manual' };
   }
-  await validarCampos();
+  await validarCampos(miGen);
 }
 
-async function validarCampos(){
+async function validarCampos(gen){
   const d = leerCampos();
   window.__datos = { ...window.__datos, ...d };
   const chips = [];
   chips.push(ncfValido(d.ncf) ? okChip('NCF válido') : warnChip('NCF a revisar'));
   chips.push(normalizarFecha(d.fechaEmision) ? okChip('Fecha OK') : warnChip('Fecha a revisar'));
+  // Estado de duplicado coherente con el banner: por defecto null; solo se marca al confirmarlo.
+  window.__datos.duplicadaDe = null;
   let dupText = '';
   const fechaISO = normalizarFecha(d.fechaEmision);
   if (fechaISO && conectado() && get('carpetaRaizId') && d.ncf){
     try {
-      const mesId = await asegurarCarpeta(nombreCarpetaMes(fechaISO), get('carpetaRaizId'));
-      const idx = await leerJSON(mesId, '_gastos.json');
-      const dup = buscarDuplicado(idx, d.ncf);
-      if (dup){
-        dupText = `Factura Duplicada — NCF ya registrado en ${dup.archivo}`;
-        window.__datos.duplicadaDe = dup.archivo;
-      } else {
-        window.__datos.duplicadaDe = null;
+      // Solo lectura: NO crear la carpeta del mes por validar (evita carpetas vacías en Drive).
+      // La creación real ocurre en la subida (Task 5, con asegurarCarpeta).
+      const mesId = await buscarCarpeta(nombreCarpetaMes(fechaISO), get('carpetaRaizId'));
+      if (gen != null && gen !== genOCR) return; // lectura obsoleta; no pisar el DOM/__datos
+      if (mesId){ // si la carpeta del mes aún no existe, no hay duplicados posibles
+        const idx = await leerJSON(mesId, '_gastos.json');
+        if (gen != null && gen !== genOCR) return;
+        const dup = buscarDuplicado(idx, d.ncf);
+        if (dup){
+          dupText = `Factura Duplicada — NCF ya registrado en ${dup.archivo}`;
+          window.__datos.duplicadaDe = dup.archivo;
+        }
       }
     } catch(e){ console.error(e); } // no romper la revisión si Drive falla al chequear duplicados
   }
@@ -213,7 +229,7 @@ async function validarCampos(){
   document.getElementById('valid-row').innerHTML = chips.join('');
 }
 
-CAMPOS_IDS.forEach(id => document.getElementById(id).addEventListener('change', validarCampos));
+CAMPOS_IDS.forEach(id => document.getElementById(id).addEventListener('change', () => validarCampos()));
 
 async function reprocesarRealce(){
   const res = window.__resultado;
@@ -434,7 +450,7 @@ inpClient.addEventListener('change', () => set('clientId', inpClient.value.trim(
 inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.value.trim() || 'Gastos_NCF'); set('carpetaRaizId', null); });
 
 // Conexión a Google Drive (Task 9)
-import { initAuth, conectar, conectado, asegurarCarpeta, listarNombres, subirJPEG, leerJSON } from './drive.js';
+import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON } from './drive.js';
 
 document.getElementById('btn-conectar').addEventListener('click', async () => {
   const btn = document.getElementById('btn-conectar');
