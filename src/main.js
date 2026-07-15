@@ -123,15 +123,18 @@ window.procesarYRevisar = procesarYRevisar;
 async function reprocesarRealce(){
   const res = window.__resultado;
   if (!res || !res.canvasPlano) return;
+  let ok = true;
   const final = await conOverlay(() => {
     try { return aplicarRealce(res.canvasPlano, { modo, intensidad }); }
-    catch(e){ console.error(e); toast('No se pudo aplicar el filtro'); return res.canvasFinal; }
+    catch(e){ console.error(e); toast('No se pudo aplicar el filtro'); ok = false; return res.canvasFinal; }
   });
   res.canvasFinal = final;
-  res.modo = modo;
-  res.intensidad = intensidad;
   pintarEnRevision(final);
-  document.getElementById('rev-file').textContent = `Ortofoto · ${ETIQUETA_MODO[modo] || modo}`;
+  if (ok){ // solo reflejar el modo nuevo si el realce tuvo éxito (no mentir la etiqueta tras un error)
+    res.modo = modo;
+    res.intensidad = intensidad;
+    document.getElementById('rev-file').textContent = `Ortofoto · ${ETIQUETA_MODO[modo] || modo}`;
+  }
   document.getElementById('seg-proc').classList.add('on');
   document.getElementById('seg-orig').classList.remove('on');
 }
@@ -141,6 +144,7 @@ async function reprocesarRealce(){
 const filtrosEl = document.getElementById('filtros');
 const filtrosDefEl = document.getElementById('filtros-def');
 const intensidadRow = document.getElementById('intensidad-row');
+const intensidadRowDef = document.getElementById('intensidad-row-def');
 const intensidadInput = document.getElementById('intensidad');
 const intensidadDefInput = document.getElementById('intensidad-def');
 
@@ -149,7 +153,9 @@ function actualizarUIFiltros(){
     cont.querySelectorAll('.filtro').forEach(b => b.classList.toggle('on', b.dataset.modo === modo)));
   intensidadInput.value = intensidad;
   intensidadDefInput.value = intensidad;
-  intensidadRow.hidden = modo === 'original';
+  const esOriginal = modo === 'original';
+  intensidadRow.hidden = esOriginal;       // la intensidad no aplica en modo "Original"
+  intensidadRowDef.hidden = esOriginal;
 }
 actualizarUIFiltros();
 
