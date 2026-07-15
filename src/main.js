@@ -174,7 +174,7 @@ esqCanvas.addEventListener('pointermove', mover);
 esqCanvas.addEventListener('pointerup', soltar);
 
 import { cvReady } from './cvready.js';
-import { detectarDocumento, esEstable, nitidez, ordenarEsquinas } from './detect.js';
+import { detectarDocumento, esEstable, nitidezRegion, ordenarEsquinas } from './detect.js';
 
 const overlay = document.getElementById('cam-overlay');
 let ultimasEsquinas = null;
@@ -199,7 +199,9 @@ function dibujarOverlay(esquinas){
 }
 
 const UMBRAL_NITIDEZ = 120;   // varianza mínima del Laplaciano (ajustable en campo)
-const FRAMES_ESTABLES = 8;    // ~1 s a 8 fps de análisis
+// Bajado de 8 a 4 (~0.5 s): con la nitidez medida solo dentro del papel ya no hace
+// falta esperar tanto para confirmar estabilidad; dispara más rápido en campo.
+const FRAMES_ESTABLES = 4;
 let estables = 0, disparando = false;
 
 async function buclDeteccion(){
@@ -218,7 +220,7 @@ async function buclDeteccion(){
         statusTxt.textContent = 'Documento detectado — mantén firme';
         document.getElementById('cam-status').classList.add('lock');
         shutter.classList.add('arm'); // anima el anillo (CSS existente)
-        if (estables >= FRAMES_ESTABLES && nitidez(frame) >= UMBRAL_NITIDEZ){
+        if (estables >= FRAMES_ESTABLES && nitidezRegion(frame, esquinas) >= UMBRAL_NITIDEZ){
           disparando = true;
           estables = 0;
           shutter.classList.remove('arm');
