@@ -236,8 +236,10 @@ inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.valu
 import { initAuth, conectar, conectado, asegurarCarpeta } from './drive.js';
 
 document.getElementById('btn-conectar').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-conectar');
   const clientId = get('clientId', '');
   if (!clientId) return toast('Pega primero tu Client ID de Google');
+  btn.disabled = true;
   try {
     initAuth(clientId);
     await conectar();
@@ -250,5 +252,7 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
   } catch(e){
     console.error(e);
     toast('No se pudo conectar: ' + e.message);
+  } finally {
+    btn.disabled = false;
   }
 });

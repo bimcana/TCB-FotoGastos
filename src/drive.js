@@ -13,13 +13,16 @@ export function conectado(){ return !!accessToken && Date.now() < expiraEn; }
 export function conectar(){
   return new Promise((res, rej) => {
     if (!tokenClient) return rej(new Error('Falta el Client ID en Ajustes'));
+    const silencioso = conectado();
+    const timer = setTimeout(() => rej(new Error('Tiempo de espera agotado al conectar con Google')), 60000);
     tokenClient.callback = t => {
+      clearTimeout(timer);
       if (t.error) return rej(new Error(t.error));
       accessToken = t.access_token;
       expiraEn = Date.now() + (t.expires_in - 60) * 1000;
       res();
     };
-    tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+    tokenClient.requestAccessToken({ prompt: silencioso ? '' : 'consent' });
   });
 }
 
@@ -35,7 +38,7 @@ async function api(path, opts = {}){
 export async function asegurarCarpeta(nombre, padreId = null){
   const filtroPadre = padreId ? ` and '${padreId}' in parents` : '';
   const q = encodeURIComponent(
-    `name='${nombre.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${filtroPadre}`);
+    `name='${nombre.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${filtroPadre}`);
   const res = await api(`files?q=${q}&fields=files(id,name)&pageSize=10`);
   if (res.files.length) return res.files[0].id;
   const creada = await api('files?fields=id', {
