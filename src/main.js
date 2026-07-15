@@ -83,7 +83,7 @@ function procesarYRevisar(){
   }
   window.__resultado = { canvasProcesado: procesado, canvasOriginal: canvas, esquinas };
   pintarEnRevision(procesado || canvas);
-  document.getElementById('rev-file').textContent = procesado ? 'Ortofoto · fondo 254' : 'Sin detección — ajusta las esquinas';
+  document.getElementById('rev-file').textContent = procesado ? 'Ortofoto · auto-color' : 'Sin detección — ajusta las esquinas';
   document.getElementById('seg-proc').classList.toggle('on', !!procesado);
   document.getElementById('seg-orig').classList.toggle('on', !procesado);
   show('revision');
