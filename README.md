@@ -4,6 +4,8 @@ Prototipo de interfaz de **TCB FotoGastos**, una PWA de **TCB — Tax Consulting
 
 **Prototipo en vivo:** https://ariesteban.github.io/TCB-FotoGastos/
 
+**Maqueta original (referencia):** https://ariesteban.github.io/TCB-FotoGastos/prototipo/
+
 En iPhone: abrir en Safari → Compartir → **Añadir a pantalla de inicio**.
 
 > Estado: prototipo navegable (v0.5). Los datos que se muestran son genéricos de ejemplo; ninguna función es real todavía.
