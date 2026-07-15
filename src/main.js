@@ -62,3 +62,41 @@ function mostrarRevision(canvas){
   show('revision');
 }
 window.mostrarRevision = mostrarRevision;
+
+import { cvReady } from './cvready.js';
+import { detectarDocumento, esEstable, nitidez } from './detect.js';
+
+const overlay = document.getElementById('cam-overlay');
+let ultimasEsquinas = null;
+
+function dibujarOverlay(esquinas){
+  const ctx = overlay.getContext('2d');
+  overlay.width = video.videoWidth; overlay.height = video.videoHeight;
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+  if (!esquinas) return;
+  ctx.beginPath();
+  esquinas.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(74,143,231,.10)';
+  ctx.strokeStyle = '#4E9BEB'; ctx.lineWidth = overlay.width * 0.006;
+  ctx.fill(); ctx.stroke();
+}
+
+async function buclDeteccion(){
+  await cvReady();
+  const frame = document.createElement('canvas');
+  const tick = () => {
+    if (video.videoWidth && document.getElementById('scr-camara').classList.contains('active')){
+      frame.width = video.videoWidth; frame.height = video.videoHeight;
+      frame.getContext('2d').drawImage(video, 0, 0);
+      const esquinas = detectarDocumento(frame);
+      dibujarOverlay(esquinas);
+      statusTxt.textContent = esquinas ? 'Documento detectado — mantén firme' : 'Buscando documento…';
+      document.getElementById('cam-status').classList.toggle('lock', !!esquinas);
+      ultimasEsquinas = esquinas;
+    }
+    setTimeout(() => requestAnimationFrame(tick), 120); // ~8 fps de análisis
+  };
+  tick();
+}
+buclDeteccion();
