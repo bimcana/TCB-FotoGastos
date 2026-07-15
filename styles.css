@@ -125,6 +125,7 @@ body{
 }
 .chip.ok{color:#8FD8B2; border-color:rgba(76,175,125,.4); background:rgba(76,175,125,.1)}
 .chip.warn{color:#EFC57E; border-color:rgba(224,166,63,.4); background:rgba(224,166,63,.1)}
+.chip.info{color:#8FB8E8; border-color:rgba(94,155,214,.4); background:rgba(94,155,214,.12)}
 .chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor}
 .num{font-variant-numeric:tabular-nums}
 
@@ -499,6 +500,7 @@ html[data-theme="light"] .cmp{background:#E9EDF3; border-color:#D5DAE2}
 html[data-theme="light"] .cmp .layerB{background:#E9EDF3}
 html[data-theme="light"] .chip.ok{color:#1E7A4C}
 html[data-theme="light"] .chip.warn{color:#8F6400}
+html[data-theme="light"] .chip.info{color:#1E5FA8}
 html[data-theme="light"] .gem-note b{color:#8F6400}
 html[data-theme="light"] .dup-banner{color:#A63A2C; background:rgba(214,69,51,.08); border-color:rgba(214,69,51,.35)}
 html[data-theme="light"] .dup-banner b{color:#C0392B}

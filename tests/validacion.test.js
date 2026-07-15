@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ncfValido, normalizarFecha, montoValido, buscarDuplicado } from '../src/validacion.js';
+import { ncfValido, normalizarFecha, montoValido, buscarDuplicado, facturaCompleta, estadoFactura } from '../src/validacion.js';
 
 test('NCF serie B válido', () => { assert.equal(ncfValido('B0100182291'), true); });
 test('NCF serie E válido', () => { assert.equal(ncfValido('E310000083906'), true); });
@@ -24,4 +24,35 @@ test('buscarDuplicado encuentra por NCF', () => {
   assert.equal(buscarDuplicado(idx, 'B0100077145').archivo, 'Compra_100.jpg');
   assert.equal(buscarDuplicado(idx, 'B0100182291'), null);
   assert.equal(buscarDuplicado({ facturas: [] }, 'B0100077145'), null);
+});
+
+const DATOS_COMPLETOS = { fechaEmision:'2025-06-11', ncf:'B0100182291', rncEmisor:'131067603', total:3724.8 };
+
+test('facturaCompleta true con los 4 esenciales', () => {
+  assert.equal(facturaCompleta(DATOS_COMPLETOS), true);
+});
+test('facturaCompleta false si falta fechaEmision', () => {
+  assert.equal(facturaCompleta({ ...DATOS_COMPLETOS, fechaEmision: null }), false);
+});
+test('facturaCompleta false si falta ncf', () => {
+  assert.equal(facturaCompleta({ ...DATOS_COMPLETOS, ncf: null }), false);
+});
+test('facturaCompleta false si falta rncEmisor', () => {
+  assert.equal(facturaCompleta({ ...DATOS_COMPLETOS, rncEmisor: null }), false);
+});
+test('facturaCompleta false si falta total', () => {
+  assert.equal(facturaCompleta({ ...DATOS_COMPLETOS, total: null }), false);
+});
+
+test('estadoFactura: completos + origen gemini → completa', () => {
+  assert.equal(estadoFactura(DATOS_COMPLETOS, 'gemini'), 'completa');
+});
+test('estadoFactura: completos + origen manual → completa', () => {
+  assert.equal(estadoFactura(DATOS_COMPLETOS, 'manual'), 'completa');
+});
+test('estadoFactura: completos + origen local → pendiente', () => {
+  assert.equal(estadoFactura(DATOS_COMPLETOS, 'local'), 'pendiente');
+});
+test('estadoFactura: falta un esencial (total) → incompleta aunque origen sea gemini', () => {
+  assert.equal(estadoFactura({ ...DATOS_COMPLETOS, total: null }, 'gemini'), 'incompleta');
 });

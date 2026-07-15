@@ -1,4 +1,4 @@
-const VERSION = 'fase2b-v1';
+const VERSION = 'fase2c1-v1';
 // Los binarios de vendor/tesseract/ NO se precachean (varios MB): se cachean al usarse.
 const PRECACHE = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',

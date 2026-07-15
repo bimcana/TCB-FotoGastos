@@ -1,3 +1,5 @@
+import { estadoFactura } from './validacion.js';
+
 export function entradaDeFactura(nombreArchivo, datos, origen, duplicada){
   return {
     archivo: nombreArchivo,
@@ -10,7 +12,9 @@ export function entradaDeFactura(nombreArchivo, datos, origen, duplicada){
     total: datos.total ?? null,
     origen: origen || 'manual',
     duplicada: !!duplicada,
-    subidoEn: new Date().toISOString()
+    subidoEn: new Date().toISOString(),
+    estado: estadoFactura(datos, origen),
+    revisadaIA: false
   };
 }
 
