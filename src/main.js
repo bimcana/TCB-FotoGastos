@@ -136,31 +136,42 @@ async function reprocesarRealce(){
   document.getElementById('seg-orig').classList.remove('on');
 }
 
+// Controles de filtro/intensidad: existen en Revisión (por factura) y en Ajustes (por defecto).
+// Ambos manejan el MISMO estado `modo`/`intensidad`, así que se mantienen sincronizados.
 const filtrosEl = document.getElementById('filtros');
+const filtrosDefEl = document.getElementById('filtros-def');
 const intensidadRow = document.getElementById('intensidad-row');
 const intensidadInput = document.getElementById('intensidad');
+const intensidadDefInput = document.getElementById('intensidad-def');
 
 function actualizarUIFiltros(){
-  filtrosEl.querySelectorAll('.filtro').forEach(b => b.classList.toggle('on', b.dataset.modo === modo));
+  [filtrosEl, filtrosDefEl].forEach(cont =>
+    cont.querySelectorAll('.filtro').forEach(b => b.classList.toggle('on', b.dataset.modo === modo)));
   intensidadInput.value = intensidad;
+  intensidadDefInput.value = intensidad;
   intensidadRow.hidden = modo === 'original';
 }
 actualizarUIFiltros();
 
-filtrosEl.addEventListener('click', (ev) => {
-  const btn = ev.target.closest('.filtro');
-  if (!btn) return;
-  modo = btn.dataset.modo;
+function cambiarModo(nuevo){
+  modo = nuevo;
   set('modoImagen', modo);
   actualizarUIFiltros();
   if (window.__resultado && window.__resultado.canvasPlano) reprocesarRealce();
-});
-
-intensidadInput.addEventListener('change', () => {
-  intensidad = parseInt(intensidadInput.value, 10);
+}
+function cambiarIntensidad(valor){
+  intensidad = parseInt(valor, 10);
   set('intensidad', intensidad);
+  actualizarUIFiltros();
   if (window.__resultado && window.__resultado.canvasPlano) reprocesarRealce();
-});
+}
+
+[filtrosEl, filtrosDefEl].forEach(cont => cont.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.filtro');
+  if (btn) cambiarModo(btn.dataset.modo);
+}));
+intensidadInput.addEventListener('change', () => cambiarIntensidad(intensidadInput.value));
+intensidadDefInput.addEventListener('change', () => cambiarIntensidad(intensidadDefInput.value));
 
 document.getElementById('seg-proc').addEventListener('click', () => {
   if (!window.__resultado) return;
