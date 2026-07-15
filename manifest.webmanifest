@@ -1,8 +1,9 @@
 {
   "name": "TCB FotoGastos",
   "short_name": "FotoGastos",
-  "description": "Prototipo — captura y organización de facturas con NCF (Rep. Dom.)",
-  "start_url": ".",
+  "description": "Captura y organización de facturas con NCF (Rep. Dom.)",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#0B1322",
   "theme_color": "#0B1322",
