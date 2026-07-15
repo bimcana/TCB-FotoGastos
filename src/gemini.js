@@ -51,8 +51,19 @@ export function parseRespuesta(json){
 }
 
 function canvasABase64(canvas){
-  // dataURL "data:image/jpeg;base64,XXXX" → solo la parte base64
-  return canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+  // Reducir a lado máximo ~1600px acelera la subida y el análisis (sobre todo con conexión
+  // inestable) sin perder legibilidad del texto para el modelo. dataURL → solo el base64.
+  const maxLado = 1600;
+  const escala = Math.min(1, maxLado / Math.max(canvas.width, canvas.height));
+  let fuente = canvas;
+  if (escala < 1){
+    const c = document.createElement('canvas');
+    c.width = Math.round(canvas.width * escala);
+    c.height = Math.round(canvas.height * escala);
+    c.getContext('2d').drawImage(canvas, 0, 0, c.width, c.height);
+    fuente = c;
+  }
+  return fuente.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
 export async function extraerDatos(canvas, apiKey, modelo = MODELO_DEFECTO){
