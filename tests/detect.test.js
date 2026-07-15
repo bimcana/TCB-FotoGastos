@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ordenarEsquinas, esEstable, dimensionesDestino, cuadrilateroValido, areaCuadrilatero } from '../src/detect.js';
+import { ordenarEsquinas, esEstable, dimensionesDestino, cuadrilateroValido, areaCuadrilatero, boundingBox } from '../src/detect.js';
 
 const cuad = [{x:100,y:10},{x:10,y:12},{x:12,y:200},{x:98,y:198}]; // desordenado
 
@@ -36,4 +36,16 @@ test('rechaza cuadrilatero diminuto', () => {
 test('acepta un papel razonable centrado', () => {
   const papel = [{x:80,y:50},{x:320,y:55},{x:315,y:250},{x:75,y:245}];
   assert.equal(cuadrilateroValido(papel, 400, 300), true);
+});
+
+test('bounding box de un cuadrilatero inclinado', () => {
+  const bb = boundingBox([{x:80,y:50},{x:320,y:55},{x:315,y:250},{x:75,y:245}]);
+  assert.equal(bb.x, 75);
+  assert.equal(bb.y, 50);
+  assert.equal(bb.w, 320 - 75);   // 245
+  assert.equal(bb.h, 250 - 50);   // 200
+});
+test('bounding box nunca tiene ancho/alto cero', () => {
+  const bb = boundingBox([{x:10,y:10},{x:10,y:10},{x:10,y:10},{x:10,y:10}]);
+  assert.ok(bb.w >= 1 && bb.h >= 1);
 });

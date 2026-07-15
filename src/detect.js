@@ -121,3 +121,26 @@ export function nitidez(canvas){
     if (std) std.delete();
   }
 }
+
+export function boundingBox(esquinas){
+  const xs = esquinas.map(p => p.x), ys = esquinas.map(p => p.y);
+  const x = Math.floor(Math.min(...xs)), y = Math.floor(Math.min(...ys));
+  const w = Math.max(1, Math.ceil(Math.max(...xs)) - x);
+  const h = Math.max(1, Math.ceil(Math.max(...ys)) - y);
+  return { x, y, w, h };
+}
+
+// Nitidez (varianza del Laplaciano) medida SOLO dentro del papel detectado.
+// Así una factura pequeña sobre fondo liso no queda penalizada por el fondo.
+export function nitidezRegion(canvas, esquinas){
+  if (!esquinas) return nitidez(canvas);
+  const bb = boundingBox(esquinas);
+  const cx = Math.max(0, Math.min(bb.x, canvas.width - 1));
+  const cy = Math.max(0, Math.min(bb.y, canvas.height - 1));
+  const cw = Math.max(1, Math.min(bb.w, canvas.width - cx));
+  const ch = Math.max(1, Math.min(bb.h, canvas.height - cy));
+  const recorte = document.createElement('canvas');
+  recorte.width = cw; recorte.height = ch;
+  recorte.getContext('2d').drawImage(canvas, cx, cy, cw, ch, 0, 0, cw, ch);
+  return nitidez(recorte);
+}
