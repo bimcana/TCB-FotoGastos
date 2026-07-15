@@ -1,4 +1,4 @@
-const MODELO = 'gemini-2.5-flash';
+const MODELO_DEFECTO = 'gemini-3.5-flash';
 const ENDPOINT = m => `https://generativelanguage.googleapis.com/v1beta/models/${m}:generateContent`;
 
 const ESQUEMA = {
@@ -55,9 +55,9 @@ function canvasABase64(canvas){
   return canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
 }
 
-export async function extraerDatos(canvas, apiKey){
+export async function extraerDatos(canvas, apiKey, modelo = MODELO_DEFECTO){
   const b64 = canvasABase64(canvas);
-  const r = await fetch(`${ENDPOINT(MODELO)}?key=${encodeURIComponent(apiKey)}`, {
+  const r = await fetch(`${ENDPOINT(modelo)}?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(cuerpoPeticion(b64))
   });

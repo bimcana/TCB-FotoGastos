@@ -66,6 +66,7 @@
             <span class="chip" id="datos-origen" hidden></span>
           </div>
           <div class="dup-banner" id="dup-banner" hidden></div>
+          <div class="nota-verificar" id="nota-verificar" hidden>Leído sin conexión/sin IA — revisa los datos, por favor.</div>
           <div class="campos">
             <label class="campo campo-wide"><span>Fecha de emisión</span><input id="c-fecha" type="text" inputmode="numeric" placeholder="AAAA-MM-DD"></label>
             <label class="campo campo-wide"><span>NCF</span><input id="c-ncf" type="text" placeholder="B0100000000"></label>
@@ -131,7 +132,13 @@
           <div class="eyebrow" style="margin-bottom:4px">Gemini — lectura de datos (OCR)</div>
           <label class="eyebrow" for="inp-gemini" style="display:block; margin-top:8px">API key de Google AI Studio</label>
           <input class="keyfield" id="inp-gemini" placeholder="AIza…">
-          <div class="gem-note" style="margin-top:8px">Con la llave, la app lee automáticamente fecha, NCF, RNC, ITBIS y total de cada factura. Las imágenes se envían a Google al leerlas. El nivel gratuito de AI Studio cubre el volumen típico.</div>
+          <label class="eyebrow" style="display:block; margin-top:10px">Modelo</label>
+          <div class="filtros" id="modelo-gemini">
+            <button class="filtro on" data-modelo="gemini-3.5-flash">3.5 Flash</button>
+            <button class="filtro" data-modelo="gemini-3-flash">3 Flash</button>
+            <button class="filtro" data-modelo="gemini-2.5-flash">2.5 Flash</button>
+          </div>
+          <div class="gem-note" style="margin-top:8px">Con la llave, la app lee automáticamente fecha, NCF, RNC, ITBIS y total de cada factura. Sin llave o sin conexión, usa un OCR local en el teléfono (menos preciso, revisa los datos). Con Gemini, las imágenes se envían a Google; el nivel gratuito de AI Studio cubre el volumen típico.</div>
         </div>
         <div style="text-align:center; padding:4px 0 2px">
           <span class="tcb-logo" style="width:72px;height:26px" role="img" aria-label="TCB"></span>

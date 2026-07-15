@@ -252,6 +252,13 @@ body{
 .proc-txt{color:#E9F1F8; font-size:14px; font-weight:600}
 @keyframes girar{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){ .spinner{animation:none} }
+/* Nota sutil de verificación cuando el OCR fue local (sin IA/offline), no un banner grande. */
+.nota-verificar{
+  font-size:11.5px; color:var(--warn); background:var(--glass);
+  border:1px solid var(--line-soft); border-left:3px solid var(--warn);
+  border-radius:8px; padding:7px 10px; margin-bottom:10px; line-height:1.4;
+}
+.nota-verificar[hidden]{display:none}
 /* Visor a pantalla completa de la factura escaneada (fondo oscuro en ambos temas). */
 .visor{
   position:absolute; inset:0; z-index:60; background:#06090F;
