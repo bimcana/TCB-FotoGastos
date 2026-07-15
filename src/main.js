@@ -710,23 +710,47 @@ async function refrescarGastos(){
       listarNombres(mesId).then(ns => ns.filter(n => /^Compra_/i.test(n))),
       leerJSON(mesId, '_gastos.json').catch(() => null)
     ]);
-    const duplicadaPorArchivo = new Map((idx?.facturas || []).map(f => [f.archivo, !!f.duplicada]));
+    const entradaPorArchivo = new Map((idx?.facturas || []).map(f => [f.archivo, f]));
     const num = n => { const m = n.match(/^Compra_(\d+)/i); return m ? parseInt(m[1], 10) : -1; };
     nombres.sort((a, b) => num(b) - num(a));
-    document.getElementById('mes-meta').textContent = `${nombres.length} facturas este mes`;
+    const nPend = (idx?.facturas || []).filter(f => f.estado === 'incompleta' || f.estado === 'pendiente').length;
+    document.getElementById('mes-meta').textContent =
+      `${nombres.length} facturas este mes` + (nPend ? ` · ${nPend} por revisar` : '');
     const lista = document.getElementById('lista-mes');
     lista.innerHTML = '';
     if (!nombres.length){
       lista.innerHTML = '<div class="gem-note">Aún no hay facturas este mes.</div>';
     } else {
+      const CHIP_ESTADO = { incompleta: ['warn', 'Datos incompletos'], pendiente: ['info', 'Pendiente de revisión'] };
       nombres.forEach(n => {
+        const e = entradaPorArchivo.get(n);
         const inv = document.createElement('div');
-        inv.className = duplicadaPorArchivo.get(n) ? 'inv dup' : 'inv';
+        inv.className = (e && e.duplicada) ? 'inv dup' : 'inv';
         const thumb = document.createElement('div'); thumb.className = 'thumb'; thumb.textContent = 'JPG';
         const info = document.createElement('div');
         const nm = document.createElement('div'); nm.className = 'nm num'; nm.textContent = n;
         info.appendChild(nm);
+        if (e && (e.fechaEmision || e.nombreComercio)){
+          const dt = document.createElement('div'); dt.className = 'dt num';
+          dt.textContent = [e.fechaEmision, e.nombreComercio].filter(Boolean).join(' · ');
+          info.appendChild(dt);
+        }
+        const amt = document.createElement('div'); amt.className = 'amt';
+        if (e && e.total != null){
+          const b = document.createElement('b'); b.className = 'num';
+          b.textContent = 'RD$ ' + Number(e.total).toLocaleString('es-DO', { minimumFractionDigits: 2 });
+          amt.appendChild(b);
+        }
+        const est = e && CHIP_ESTADO[e.estado];
+        if (est){
+          const chip = document.createElement('span');
+          chip.className = 'chip ' + est[0];
+          chip.style.cssText = 'margin-top:4px; font-size:10px; padding:2px 8px';
+          chip.innerHTML = '<span class="dot"></span>' + est[1];
+          amt.appendChild(chip);
+        }
         inv.appendChild(thumb); inv.appendChild(info);
+        if (amt.childNodes.length) inv.appendChild(amt);
         lista.appendChild(inv);
       });
     }
