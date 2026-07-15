@@ -226,6 +226,32 @@ body{
   font-weight:650; padding:7px 0; border-radius:8px; cursor:pointer;
 }
 .seg button.on{background:var(--panel2); color:#E9F1F9; border:1px solid var(--line)}
+.filtros{display:flex; gap:6px; overflow-x:auto; padding:2px 0 8px; -webkit-overflow-scrolling:touch}
+.filtro{
+  flex:none; border:1px solid var(--line); background:var(--glass); color:var(--dim);
+  font-family:inherit; font-size:12px; font-weight:650; padding:7px 13px; border-radius:99px;
+  cursor:pointer; white-space:nowrap;
+}
+.filtro.on{background:var(--panel2); color:var(--accent); border-color:var(--accent)}
+.filtro:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+.intensidad-row{
+  display:flex; align-items:center; gap:10px; padding:2px 2px 12px; font-size:12.5px; color:var(--dim);
+}
+.intensidad-row span{flex:none}
+.intensidad-row input[type=range]{flex:1; accent-color:var(--accent); margin-top:0}
+.intensidad-row[hidden]{display:none}
+.overlay-proc{
+  position:absolute; inset:0; z-index:50; display:flex; flex-direction:column;
+  align-items:center; justify-content:center; gap:16px; background:rgba(6,10,18,.72); backdrop-filter:blur(3px);
+}
+.overlay-proc[hidden]{display:none}
+.spinner{
+  width:46px; height:46px; border-radius:50%; border:4px solid rgba(255,255,255,.25);
+  border-top-color:var(--accent); animation:girar .8s linear infinite;
+}
+.proc-txt{color:#E9F1F8; font-size:14px; font-weight:600}
+@keyframes girar{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){ .spinner{animation:none} }
 .stage{
   border-radius:var(--r); border:1px solid var(--line-soft); overflow:hidden; position:relative;
   background:radial-gradient(120% 100% at 50% 0%, #1B2740, #0D1526); min-height:250px;

@@ -33,7 +33,25 @@ window.show = show;
 window.toast = toast;
 
 import { iniciarCamara, capturarFrame } from './camera.js';
-import { procesar, canvasAJpeg } from './process.js';
+import { procesar, aplicarRealce, canvasAJpeg } from './process.js';
+import { get, set } from './settings.js';
+
+// Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
+// es síncrono, no hay await que ceda el hilo). Con doble rAF nos aseguramos de que el
+// navegador pinte el overlay antes de bloquear el hilo con fn().
+function conOverlay(fn){
+  const ov = document.getElementById('overlay-proc');
+  ov.hidden = false;
+  return new Promise(res => {
+    requestAnimationFrame(() => requestAnimationFrame(() => { // 2 rAF: asegura el paint del overlay
+      let r; try { r = fn(); } finally { ov.hidden = true; res(r); }
+    }));
+  });
+}
+
+// Modo de realce e intensidad — persisten en Ajustes y se re-aplican sin re-warpar.
+let modo = get('modoImagen', 'color');
+let intensidad = get('intensidad', 65);
 
 const video = document.getElementById('cam-video');
 const statusTxt = document.getElementById('cam-status-txt');
@@ -74,25 +92,96 @@ function pintarEnRevision(canvas){
   rev.getContext('2d').drawImage(canvas, 0, 0);
 }
 
-function procesarYRevisar(){
+const ETIQUETA_MODO = { color: 'auto-color', byn: 'blanco y negro', grises: 'grises', original: 'original' };
+
+async function procesarYRevisar(){
   const { canvas, esquinas } = window.__captura;
-  let procesado = null;
-  if (esquinas){
-    try { procesado = procesar(canvas, esquinas); }
-    catch(e){ console.error(e); toast('No se pudo procesar; ajusta las esquinas'); }
-  }
-  window.__resultado = { canvasProcesado: procesado, canvasOriginal: canvas, esquinas };
-  pintarEnRevision(procesado || canvas);
-  document.getElementById('rev-file').textContent = procesado ? 'Ortofoto · auto-color' : 'Sin detección — ajusta las esquinas';
-  document.getElementById('seg-proc').classList.toggle('on', !!procesado);
-  document.getElementById('seg-orig').classList.toggle('on', !procesado);
   show('revision');
+  let r = null;
+  if (esquinas){
+    r = await conOverlay(() => {
+      try { return procesar(canvas, esquinas, { modo, intensidad }); }
+      catch(e){ console.error(e); toast('No se pudo procesar; ajusta las esquinas'); return null; }
+    });
+  }
+  window.__resultado = {
+    canvasPlano: r ? r.plano : null,
+    canvasFinal: r ? r.final : null,
+    canvasOriginal: canvas,
+    esquinas,
+    modo,
+    intensidad
+  };
+  pintarEnRevision((r && r.final) || canvas);
+  document.getElementById('rev-file').textContent = r ? `Ortofoto · ${ETIQUETA_MODO[modo] || modo}` : 'Sin detección — ajusta las esquinas';
+  document.getElementById('seg-proc').classList.toggle('on', !!r);
+  document.getElementById('seg-orig').classList.toggle('on', !r);
+  actualizarUIFiltros();
 }
 window.procesarYRevisar = procesarYRevisar;
 
+async function reprocesarRealce(){
+  const res = window.__resultado;
+  if (!res || !res.canvasPlano) return;
+  let ok = true;
+  const final = await conOverlay(() => {
+    try { return aplicarRealce(res.canvasPlano, { modo, intensidad }); }
+    catch(e){ console.error(e); toast('No se pudo aplicar el filtro'); ok = false; return res.canvasFinal; }
+  });
+  res.canvasFinal = final;
+  pintarEnRevision(final);
+  if (ok){ // solo reflejar el modo nuevo si el realce tuvo éxito (no mentir la etiqueta tras un error)
+    res.modo = modo;
+    res.intensidad = intensidad;
+    document.getElementById('rev-file').textContent = `Ortofoto · ${ETIQUETA_MODO[modo] || modo}`;
+  }
+  document.getElementById('seg-proc').classList.add('on');
+  document.getElementById('seg-orig').classList.remove('on');
+}
+
+// Controles de filtro/intensidad: existen en Revisión (por factura) y en Ajustes (por defecto).
+// Ambos manejan el MISMO estado `modo`/`intensidad`, así que se mantienen sincronizados.
+const filtrosEl = document.getElementById('filtros');
+const filtrosDefEl = document.getElementById('filtros-def');
+const intensidadRow = document.getElementById('intensidad-row');
+const intensidadRowDef = document.getElementById('intensidad-row-def');
+const intensidadInput = document.getElementById('intensidad');
+const intensidadDefInput = document.getElementById('intensidad-def');
+
+function actualizarUIFiltros(){
+  [filtrosEl, filtrosDefEl].forEach(cont =>
+    cont.querySelectorAll('.filtro').forEach(b => b.classList.toggle('on', b.dataset.modo === modo)));
+  intensidadInput.value = intensidad;
+  intensidadDefInput.value = intensidad;
+  const esOriginal = modo === 'original';
+  intensidadRow.hidden = esOriginal;       // la intensidad no aplica en modo "Original"
+  intensidadRowDef.hidden = esOriginal;
+}
+actualizarUIFiltros();
+
+function cambiarModo(nuevo){
+  modo = nuevo;
+  set('modoImagen', modo);
+  actualizarUIFiltros();
+  if (window.__resultado && window.__resultado.canvasPlano) reprocesarRealce();
+}
+function cambiarIntensidad(valor){
+  intensidad = parseInt(valor, 10);
+  set('intensidad', intensidad);
+  actualizarUIFiltros();
+  if (window.__resultado && window.__resultado.canvasPlano) reprocesarRealce();
+}
+
+[filtrosEl, filtrosDefEl].forEach(cont => cont.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.filtro');
+  if (btn) cambiarModo(btn.dataset.modo);
+}));
+intensidadInput.addEventListener('change', () => cambiarIntensidad(intensidadInput.value));
+intensidadDefInput.addEventListener('change', () => cambiarIntensidad(intensidadDefInput.value));
+
 document.getElementById('seg-proc').addEventListener('click', () => {
   if (!window.__resultado) return;
-  if (window.__resultado.canvasProcesado){ pintarEnRevision(window.__resultado.canvasProcesado);
+  if (window.__resultado.canvasFinal){ pintarEnRevision(window.__resultado.canvasFinal);
     document.getElementById('seg-proc').classList.add('on'); document.getElementById('seg-orig').classList.remove('on'); }
   else { toast('Aún no hay versión procesada — aplica las esquinas'); }
 });
@@ -244,8 +333,6 @@ async function buclDeteccion(){
 buclDeteccion();
 
 // Ajustes persistentes (Task 7)
-import { get, set } from './settings.js';
-
 const inpClient = document.getElementById('inp-clientid');
 const inpCarpeta = document.getElementById('inp-carpeta');
 inpClient.value = get('clientId', '');
@@ -298,7 +385,7 @@ async function subirFactura(blob, fechaISO){
 document.getElementById('confirm-btn').addEventListener('click', async () => {
   const res = window.__resultado;
   if (!res) return;
-  const canvas = res.canvasProcesado || res.canvasOriginal;
+  const canvas = res.canvasFinal || res.canvasOriginal;
   const btn = document.getElementById('confirm-btn');
   btn.disabled = true; btn.textContent = 'Subiendo…';
   let blob;
