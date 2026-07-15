@@ -250,6 +250,7 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
     document.getElementById('gastos-sub').textContent = 'Google Drive · conectado';
     toast('Google Drive conectado');
     refrescarGastos();
+    procesarCola();
   } catch(e){
     console.error(e);
     toast('No se pudo conectar: ' + e.message);
@@ -261,6 +262,9 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
 // Confirmar y subir + pantalla Gastos (Task 10)
 import { nombreCarpetaMes, siguienteNombre, hoyISO } from './naming.js';
 import { canvasAJpeg } from './process.js';
+
+// Cola offline en IndexedDB con reintento al reconectar (Task 11)
+import { encolar, pendientes, eliminar, cuenta } from './queue.js';
 
 async function subirFactura(blob, fechaISO){
   const raizId = get('carpetaRaizId');
@@ -277,21 +281,48 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
   const canvas = res.canvasProcesado || res.canvasOriginal;
   const btn = document.getElementById('confirm-btn');
   btn.disabled = true; btn.textContent = 'Subiendo…';
+  let blob;
   try {
-    const blob = await canvasAJpeg(canvas);
+    blob = await canvasAJpeg(canvas);
     const nombre = await subirFactura(blob, hoyISO());
     toast(`Subida: ${nombre} ✓`);
     show('gastos');
     refrescarGastos();
   } catch(e){
     console.error(e);
-    toast(e.message === 'sin-conexion'
-      ? 'Sin conexión a Drive — conecta en Ajustes'   // Task 11 la encola aquí
-      : 'Error al subir: ' + e.message);
+    if (e.message === 'sin-conexion'){
+      await encolar({ blob, fechaISO: hoyISO() });
+      toast('Sin conexión — factura en cola, subirá al reconectar');
+      actualizarBadge();
+      show('camara');
+    } else {
+      toast('Error al subir: ' + e.message);
+    }
   } finally {
     btn.disabled = false; btn.textContent = 'Confirmar y subir';
   }
 });
+
+async function actualizarBadge(){
+  const n = await cuenta();
+  const b = document.getElementById('cola-badge');
+  b.style.display = n ? 'block' : 'none';
+  b.textContent = n;
+}
+
+async function procesarCola(){
+  if (!conectado()) return;
+  for (const item of await pendientes()){
+    try {
+      const nombre = await subirFactura(item.blob, item.fechaISO);
+      await eliminar(item.id);
+      toast(`Cola: ${nombre} subida ✓`);
+    } catch(e){ break; } // se reintenta en la próxima conexión
+  }
+  actualizarBadge();
+}
+window.addEventListener('online', procesarCola);
+actualizarBadge();
 
 async function refrescarGastos(){
   const raizId = get('carpetaRaizId');
