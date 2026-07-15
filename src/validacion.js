@@ -21,6 +21,16 @@ export function normalizarFecha(str){
 
 export function montoValido(n){ return typeof n === 'number' && Number.isFinite(n) && n >= 0; }
 
+export function facturaCompleta(datos){
+  return !!(normalizarFecha(datos.fechaEmision) && datos.ncf && datos.rncEmisor && montoValido(datos.total));
+}
+
+export function estadoFactura(datos, origen){
+  if (!facturaCompleta(datos)) return 'incompleta';
+  if (origen === 'local') return 'pendiente'; // OCR local: menos confiable, a verificar con Gemini
+  return 'completa'; // gemini o manual con esenciales
+}
+
 export function buscarDuplicado(indice, ncf){
   if (!indice || !Array.isArray(indice.facturas) || !ncf) return null;
   const objetivo = String(ncf).trim().toLowerCase();
