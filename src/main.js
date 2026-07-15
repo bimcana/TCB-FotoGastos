@@ -33,7 +33,7 @@ window.show = show;
 window.toast = toast;
 
 import { iniciarCamara, capturarFrame } from './camera.js';
-import { procesar } from './process.js';
+import { procesar, canvasAJpeg } from './process.js';
 
 const video = document.getElementById('cam-video');
 const statusTxt = document.getElementById('cam-status-txt');
@@ -46,7 +46,20 @@ iniciarCamara(video)
     console.error(err);
   });
 
+// Recuperar cámara al volver de background (iOS suele terminar el track).
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  const track = video.srcObject && video.srcObject.getVideoTracks()[0];
+  if (!track || track.readyState === 'ended'){
+    iniciarCamara(video).catch(err => {
+      statusTxt.textContent = 'Sin acceso a la cámara';
+      console.error(err);
+    });
+  }
+});
+
 document.getElementById('shutter').addEventListener('click', () => {
+  if (disparando) return;
   if (!video.videoWidth) return toast('La cámara no está lista');
   const canvas = capturarFrame(video);
   window.__captura = { canvas, esquinas: ultimasEsquinas };
@@ -168,14 +181,20 @@ let ultimasEsquinas = null;
 
 function dibujarOverlay(esquinas){
   const ctx = overlay.getContext('2d');
-  overlay.width = video.videoWidth; overlay.height = video.videoHeight;
-  ctx.clearRect(0, 0, overlay.width, overlay.height);
-  if (!esquinas) return;
+  const cw = overlay.clientWidth, ch = overlay.clientHeight;
+  if (overlay.width !== cw || overlay.height !== ch){ overlay.width = cw; overlay.height = ch; }
+  ctx.clearRect(0, 0, cw, ch);
+  if (!esquinas || !video.videoWidth) return;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const s = Math.max(cw / vw, ch / vh);
+  const ox = (cw - vw * s) / 2, oy = (ch - vh * s) / 2;
+  const pts = esquinas.map(p => ({ x: p.x * s + ox, y: p.y * s + oy }));
   ctx.beginPath();
-  esquinas.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
+  pts.forEach((p, i) => i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y));
   ctx.closePath();
   ctx.fillStyle = 'rgba(74,143,231,.10)';
-  ctx.strokeStyle = '#4E9BEB'; ctx.lineWidth = overlay.width * 0.006;
+  ctx.strokeStyle = '#4E9BEB';
+  ctx.lineWidth = cw * 0.006;
   ctx.fill(); ctx.stroke();
 }
 
@@ -261,7 +280,6 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
 
 // Confirmar y subir + pantalla Gastos (Task 10)
 import { nombreCarpetaMes, siguienteNombre, hoyISO } from './naming.js';
-import { canvasAJpeg } from './process.js';
 
 // Cola offline en IndexedDB con reintento al reconectar (Task 11)
 import { encolar, pendientes, eliminar, cuenta } from './queue.js';
@@ -284,6 +302,14 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
   let blob;
   try {
     blob = await canvasAJpeg(canvas);
+    if (colaEnProceso){
+      await encolar({ blob, fechaISO: hoyISO() });
+      toast('Subida en curso — factura añadida a la cola');
+      actualizarBadge();
+      show('camara');
+      return;
+    }
+    colaEnProceso = true;
     const nombre = await subirFactura(blob, hoyISO());
     toast(`Subida: ${nombre} ✓`);
     show('gastos');
@@ -292,13 +318,15 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
     console.error(e);
     if (e.message === 'sin-conexion'){
       await encolar({ blob, fechaISO: hoyISO() });
-      toast('Sin conexión — factura en cola, subirá al reconectar');
+      toast('Sin conexión con Drive — en cola; reconecta en Ajustes para subirla');
+      document.getElementById('gastos-sub').textContent = 'Google Drive · reconectar en Ajustes';
       actualizarBadge();
       show('camara');
     } else {
       toast('Error al subir: ' + e.message);
     }
   } finally {
+    colaEnProceso = false;
     btn.disabled = false; btn.textContent = 'Confirmar y subir';
   }
 });
@@ -337,11 +365,25 @@ async function refrescarGastos(){
   if (!conectado() || !raizId) return;
   try {
     const mesId = await asegurarCarpeta(carpetaMes, raizId);
-    const nombres = (await listarNombres(mesId)).filter(n => /^Compra_/i.test(n)).sort().reverse();
+    const nombres = (await listarNombres(mesId)).filter(n => /^Compra_/i.test(n));
+    const num = n => { const m = n.match(/^Compra_(\d+)/i); return m ? parseInt(m[1], 10) : -1; };
+    nombres.sort((a, b) => num(b) - num(a));
     document.getElementById('mes-meta').textContent = `${nombres.length} facturas este mes`;
-    document.getElementById('lista-mes').innerHTML = nombres.map(n =>
-      `<div class="inv"><div class="thumb">JPG</div><div><div class="nm num">${n}</div></div></div>`).join('')
-      || '<div class="gem-note">Aún no hay facturas este mes.</div>';
+    const lista = document.getElementById('lista-mes');
+    lista.innerHTML = '';
+    if (!nombres.length){
+      lista.innerHTML = '<div class="gem-note">Aún no hay facturas este mes.</div>';
+    } else {
+      nombres.forEach(n => {
+        const inv = document.createElement('div'); inv.className = 'inv';
+        const thumb = document.createElement('div'); thumb.className = 'thumb'; thumb.textContent = 'JPG';
+        const info = document.createElement('div');
+        const nm = document.createElement('div'); nm.className = 'nm num'; nm.textContent = n;
+        info.appendChild(nm);
+        inv.appendChild(thumb); inv.appendChild(info);
+        lista.appendChild(inv);
+      });
+    }
   } catch(e){ console.error(e); }
 }
 document.getElementById('tab-gastos').addEventListener('click', refrescarGastos);
