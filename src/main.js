@@ -300,6 +300,7 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
   const btn = document.getElementById('confirm-btn');
   btn.disabled = true; btn.textContent = 'Subiendo…';
   let blob;
+  let lockAdquirido = false;
   try {
     blob = await canvasAJpeg(canvas);
     if (colaEnProceso){
@@ -309,7 +310,7 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
       show('camara');
       return;
     }
-    colaEnProceso = true;
+    colaEnProceso = true; lockAdquirido = true;
     const nombre = await subirFactura(blob, hoyISO());
     toast(`Subida: ${nombre} ✓`);
     show('gastos');
@@ -326,7 +327,7 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
       toast('Error al subir: ' + e.message);
     }
   } finally {
-    colaEnProceso = false;
+    if (lockAdquirido) colaEnProceso = false;
     btn.disabled = false; btn.textContent = 'Confirmar y subir';
   }
 });
