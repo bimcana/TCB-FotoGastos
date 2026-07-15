@@ -48,7 +48,7 @@ iniciarCamara(video)
 document.getElementById('shutter').addEventListener('click', () => {
   if (!video.videoWidth) return toast('La cámara no está lista');
   const canvas = capturarFrame(video);
-  window.__captura = { canvas, esquinas: null };
+  window.__captura = { canvas, esquinas: ultimasEsquinas };
   const fx = document.getElementById('flashfx');
   fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
   mostrarRevision(canvas);
@@ -82,20 +82,44 @@ function dibujarOverlay(esquinas){
   ctx.fill(); ctx.stroke();
 }
 
+const UMBRAL_NITIDEZ = 120;   // varianza mínima del Laplaciano (ajustable en campo)
+const FRAMES_ESTABLES = 8;    // ~1 s a 8 fps de análisis
+let estables = 0, disparando = false;
+
 async function buclDeteccion(){
   await cvReady();
   const frame = document.createElement('canvas');
   const tick = () => {
-    if (video.videoWidth && document.getElementById('scr-camara').classList.contains('active')){
+    if (video.videoWidth && document.getElementById('scr-camara').classList.contains('active') && !disparando){
       frame.width = video.videoWidth; frame.height = video.videoHeight;
       frame.getContext('2d').drawImage(video, 0, 0);
       const esquinas = detectarDocumento(frame);
       dibujarOverlay(esquinas);
-      statusTxt.textContent = esquinas ? 'Documento detectado — mantén firme' : 'Buscando documento…';
-      document.getElementById('cam-status').classList.toggle('lock', !!esquinas);
+      const shutter = document.getElementById('shutter');
+
+      if (esquinas && esEstable(ultimasEsquinas, esquinas, frame.width * 0.01)){
+        estables++;
+        statusTxt.textContent = 'Documento detectado — mantén firme';
+        document.getElementById('cam-status').classList.add('lock');
+        shutter.classList.add('arm'); // anima el anillo (CSS existente)
+        if (estables >= FRAMES_ESTABLES && nitidez(frame) >= UMBRAL_NITIDEZ){
+          disparando = true;
+          estables = 0;
+          shutter.classList.remove('arm');
+          const fx = document.getElementById('flashfx');
+          fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
+          window.__captura = { canvas: capturarFrame(video), esquinas };
+          setTimeout(() => { mostrarRevision(window.__captura.canvas); disparando = false; }, 350);
+        }
+      } else {
+        estables = 0;
+        shutter.classList.remove('arm');
+        statusTxt.textContent = esquinas ? 'Documento detectado — mantén firme' : 'Buscando documento…';
+        document.getElementById('cam-status').classList.toggle('lock', !!esquinas);
+      }
       ultimasEsquinas = esquinas;
     }
-    setTimeout(() => requestAnimationFrame(tick), 120); // ~8 fps de análisis
+    setTimeout(() => requestAnimationFrame(tick), 120);
   };
   tick();
 }
