@@ -8,7 +8,7 @@ Prototipo de interfaz de **TCB FotoGastos**, una PWA de **TCB — Tax Consulting
 
 En iPhone: abrir en Safari → Compartir → **Añadir a pantalla de inicio**.
 
-> Estado: **Fase 1.5A** — detección del papel por región (Otsu + morfología, más robusta que bordes), auto-color (fondo blanco, tinta oscura, conserva color) y guarda anti-basura (ofrece ajuste manual si no detecta bien). Sobre la Fase 1 (auto-disparo + subida a Google Drive). La maqueta de referencia sigue en `/prototipo/`.
+> Estado: **Fase 1.5B** — auto-disparo que mide nitidez dentro del papel (funciona con facturas pequeñas) y más rápido; auto-color local tipo Adobe (división por fondo morfológico: papel blanco y tinta oscura aun con luz cálida/despareja, conservando color). Sobre 1.5A (detección por región + guarda anti-basura) y la Fase 1 (subida a Google Drive). La maqueta de referencia sigue en `/prototipo/`.
 >
 > Al desplegar cambios, sube la constante VERSION de sw.js para que los usuarios reciban la actualización.
 
