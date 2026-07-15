@@ -1,4 +1,4 @@
-const VERSION = 'fase1.5b-v1';
+const VERSION = 'fase1.5c-v1';
 const PRECACHE = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'src/main.js', 'src/camera.js', 'src/detect.js', 'src/cvready.js',
