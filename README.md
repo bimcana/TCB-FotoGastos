@@ -6,13 +6,13 @@ Prototipo de interfaz de **TCB FotoGastos**, una PWA de **TCB — Tax Consulting
 
 En iPhone: abrir en Safari → Compartir → **Añadir a pantalla de inicio**.
 
-> Estado: prototipo navegable (v0.3). Los datos que se muestran son genéricos de ejemplo; ninguna función es real todavía.
+> Estado: prototipo navegable (v0.4). Los datos que se muestran son genéricos de ejemplo; ninguna función es real todavía.
 
 ## Pantallas
 
 - **Cámara** — detección de documento con disparo automático e importación desde la galería (individual o en lote).
-- **Revisión** — ortofoto fiel (sin IA) vs. original, mejora opcional con Gemini (comparador antes/después), datos leídos por OCR híbrido y validaciones de NCF.
-- **Gastos** — total del mes, facturas recientes y botón «Generar documento de Gastos» (PDF con membrete de la empresa + Excel 606).
+- **Revisión** — ortofoto fiel (sin IA) vs. original, mejora opcional con Gemini (comparador antes/después), datos leídos por OCR híbrido, validaciones de NCF y alerta de **Factura Duplicada** (descartar o subir marcada).
+- **Gastos** — total del mes, facturas recientes (las duplicadas que subieron desde la cola sin red se resaltan en rojo) y botón «Generar documento de Gastos» (PDF con membrete de la empresa + Excel 606).
 - **Ajustes** — perfil de la empresa cliente (logo y datos del membrete), nube (Google Drive / OneDrive), llave de Gemini y opciones de captura.
 
 ## Hoja de ruta

@@ -1,12 +1,14 @@
+<!DOCTYPE html>
+<html lang="es">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>TCB FotoGastos — Prototipo</title>
 <meta name="theme-color" content="#0B1322">
-<link rel="manifest" href="manifest.webmanifest">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="TCB FotoGastos">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>TCB FotoGastos — Prototipo</title>
 <style>
   :root{
     --bg:#0B1322; --bg2:#0E1830;
@@ -292,6 +294,19 @@
     display:flex; align-items:center; justify-content:center; gap:6px;
     font-size:6.5px; color:#5C6E80; border-top:1px solid #D7DEE6; padding-top:6px;
   }
+  /* duplicados */
+  .dup-banner{
+    display:none; background:rgba(224,101,87,.12); border:1px solid rgba(224,101,87,.55);
+    border-radius:12px; padding:11px 13px; font-size:12.5px; color:#F2B6AC; line-height:1.55;
+  }
+  .dup-banner.show{display:block}
+  .dup-banner b{color:#F1877A}
+  .inv.dup{
+    background:rgba(224,101,87,.09); border:1px solid rgba(224,101,87,.45);
+    border-radius:11px; padding:10px 8px; margin:4px 0;
+  }
+  .inv.dup .nm{color:#F5B3A8}
+  .inv.dup .amt span{color:#F1877A; font-weight:650}
   .batch-dots{display:flex; gap:5px; margin-top:9px}
   .bdot{height:5px; flex:1; border-radius:99px; background:#2A3B57}
   .bdot.done{background:var(--ok)}
@@ -371,7 +386,7 @@
       <div class="sub">Tax Consulting Business · firma de contabilidad</div>
     </div>
   </div>
-  <p>Prototipo navegable de la app de facturas con NCF. TCB firma la app; cada empresa cliente configura su perfil en Ajustes. Todos los datos son genéricos de ejemplo (Cliente SRL, Junio 2025). Ninguna función es real todavía.</p>
+  <p>Prototipo navegable de la app de facturas con NCF. TCB firma la app; cada empresa cliente configura su perfil en Ajustes. Datos de ejemplo: CLIENTE SRL, Junio 2025. Ninguna función es real todavía.</p>
   <div class="eyebrow">Pruébalo</div>
   <ul>
     <li>La cámara detecta y dispara sola; toca el obturador para repetir la secuencia.</li>
@@ -384,7 +399,7 @@
 </aside>
 
 <div class="phone">
-  <div class="statusbar"><span>9:41</span><span>𝗧𝗖𝗕 ᐧ ⌁ 5G ▮▮▮</span></div>
+  <div class="statusbar"><span>9:41</span><span>TCB ᐧ ⌁ 5G ▮▮▮</span></div>
   <div class="screens">
 
     <!-- ============ CÁMARA ============ -->
@@ -438,6 +453,9 @@
           </div>
           <div class="batch-dots" id="batch-dots"></div>
         </div>
+        <div class="dup-banner" id="dup-banner">
+          <b>⚠ Factura Duplicada</b> — este NCF (<span class="num">B0100000010</span>) ya existe en el mes como <span class="num">Compra_110.jpg</span> (11 jun). Puedes descartarla o subirla marcada como duplicada; las duplicadas se excluyen del documento de gastos.
+        </div>
         <div class="seg" role="tablist">
           <button class="on" id="seg-proc" onclick="setStage(false)">Procesada · se guarda así</button>
           <button id="seg-orig" onclick="setStage(true)">Original de cámara</button>
@@ -474,17 +492,18 @@
           <div class="fields">
             <div class="field"><div class="lab">Fecha de emisión</div><div class="val num">11 jun 2025</div><span class="src match">✓✓</span></div>
             <div class="field"><div class="lab">Total</div><div class="val num">RD$ 3,724.80</div><span class="src match">✓✓</span></div>
-            <div class="field wide"><div class="lab">NCF</div><div class="val num">B0100000000</div><span class="src match">✓✓</span></div>
-            <div class="field"><div class="lab">RNC emisor</div><div class="val num">100000000</div><span class="src match">✓✓</span></div>
+            <div class="field wide"><div class="lab">NCF</div><div class="val num">B0100000010</div><span class="src match">✓✓</span></div>
+            <div class="field"><div class="lab">RNC emisor</div><div class="val num">131067603</div><span class="src match">✓✓</span></div>
             <div class="field flag"><div class="lab">ITBIS</div><div class="val num">RD$ 523.80</div><span class="src check">revisar</span></div>
           </div>
           <div class="valid-row" style="margin-top:11px">
             <span class="chip ok"><span class="dot"></span>NCF válido (B01)</span>
-            <span class="chip ok"><span class="dot"></span>Sin duplicados en el mes</span>
+            <span class="chip ok" id="chip-dup"><span class="dot"></span>Sin duplicados en el mes</span>
             <span class="chip ok"><span class="dot"></span>Vigente hasta 31 dic 2025</span>
           </div>
         </div>
 
+        <button class="btn btn-ghost btn-sm" id="dup-skip" style="display:none; width:100%; color:#F1877A; border-color:rgba(224,101,87,.5)" onclick="skipDup()">Descartar factura duplicada</button>
         <button class="btn btn-primary" id="confirm-btn" onclick="confirmUpload()">Confirmar y subir · Compra_110.jpg</button>
         <button class="btn btn-ghost btn-sm" onclick="toast('Ajusta las 4 esquinas arrastrándolas (demo)')" style="width:100%">Ajustar esquinas manualmente</button>
       </div>
@@ -512,12 +531,16 @@
         </div>
 
         <div class="card">
-          <div class="eyebrow" style="margin-bottom:6px">Recientes</div>
+          <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px">
+            <span class="eyebrow">Recientes</span>
+            <span class="chip" style="color:#F1877A; border-color:rgba(224,101,87,.45); background:rgba(224,101,87,.1)"><span class="dot"></span>1 duplicada por revisar</span>
+          </div>
           <div class="invoice-list">
-            <div class="inv"><div class="thumb">JPG</div><div><div class="nm num">Compra_110</div><div class="dt num">11 jun · NCF B0100000000 · Supermercado</div></div><div class="amt"><b class="num">RD$ 3,724.80</b><span class="num">ITBIS 523.80</span></div></div>
-            <div class="inv"><div class="thumb">JPG</div><div><div class="nm num">Compra_100</div><div class="dt num">10 jun · NCF B0100000001 · Estación de combustible</div></div><div class="amt"><b class="num">RD$ 2,500.00</b><span class="num">ITBIS 0.00</span></div></div>
-            <div class="inv"><div class="thumb">JPG</div><div><div class="nm num">Compra_090</div><div class="dt num">09 jun · NCF B0100000002 · Restaurante</div></div><div class="amt"><b class="num">RD$ 5,547.00</b><span class="num">ITBIS 748.11</span></div></div>
-            <div class="inv"><div class="thumb">JPG</div><div><div class="nm num">Compra_080</div><div class="dt num">08 jun · NCF B0100000003 · Ferretería</div></div><div class="amt"><b class="num">RD$ 1,890.40</b><span class="num">ITBIS 288.37</span></div></div>
+            <div class="inv dup" onclick="toast('Subida desde la cola sin red — revisa y elimina o conserva (demo)')"><div class="thumb">JPG</div><div><div class="nm num">Compra_101</div><div class="dt num">10 jun · NCF B0100000009 · subió desde la cola sin red</div></div><div class="amt"><b class="num">RD$ 2,500.00</b><span>Duplicada de Compra_100</span></div></div>
+            <div class="inv"><div class="thumb">JPG</div><div><div class="nm num">Compra_110</div><div class="dt num">11 jun · NCF B0100000010 · Comercio Ejemplo</div></div><div class="amt"><b class="num">RD$ 3,724.80</b><span class="num">ITBIS 523.80</span></div></div>
+            <div class="inv"><div class="thumb">JPG</div><div><div class="nm num">Compra_100</div><div class="dt num">10 jun · NCF B0100000009 · Estación de Combustible</div></div><div class="amt"><b class="num">RD$ 2,500.00</b><span class="num">ITBIS 0.00</span></div></div>
+            <div class="inv"><div class="thumb">JPG</div><div><div class="nm num">Compra_090</div><div class="dt num">09 jun · NCF B0100000008 · Supermercado Ejemplo</div></div><div class="amt"><b class="num">RD$ 5,547.00</b><span class="num">ITBIS 748.11</span></div></div>
+            <div class="inv"><div class="thumb">JPG</div><div><div class="nm num">Compra_080</div><div class="dt num">08 jun · NCF B0100000007 · Ferretería Ejemplo</div></div><div class="amt"><b class="num">RD$ 1,890.40</b><span class="num">ITBIS 288.37</span></div></div>
           </div>
         </div>
 
@@ -538,8 +561,8 @@
             <div class="eyebrow" style="margin-bottom:8px">Vista previa · portada del PDF</div>
             <div class="page">
               <div class="lh">
-                <div class="lh-logo">LOGO<small>EMPRESA CLIENTE</small></div>
-                <div class="lh-data"><b>Cliente SRL | RNC: 000-0000-00</b> | Ciudad, Provincia, Rep. Dom.<br>Tel: +1 (000) 000-0000 | Correo: correo@cliente.com</div>
+                <div class="lh-logo">LOGO<small>LOGO DE LA EMPRESA</small></div>
+                <div class="lh-data"><b>CLIENTE SRL | RNC: 000-0000-00</b> | Ciudad, Provincia, Rep. Dom.<br>Tel: +1 (000) 000-0000 | Correo: correo@cliente.com</div>
               </div>
               <div class="page-mid">Facturas NCF | Junio 2025</div>
               <div class="page-foot"><span class="tcb-logo" style="width:30px;height:11px"></span><span>© TCB — Tax Consulting Business · generado con TCB FotoGastos</span></div>
@@ -565,11 +588,11 @@
           <div class="eyebrow" style="margin-bottom:4px">Empresa — membrete del documento</div>
           <div class="set-row">
             <div class="ico" style="background:#F5F8FB; color:#1F3864; font-weight:800; font-size:8px; letter-spacing:.4px; text-align:center; line-height:1.15">LOGO</div>
-            <div><div class="t">Logo de la empresa</div><div class="d">logo_cliente.png</div></div>
+            <div><div class="t">Logo de la empresa</div><div class="d">logo.png</div></div>
             <button class="end link" onclick="toast('Selector de imagen para el logo (demo)')">Cambiar</button>
           </div>
           <div class="set-row">
-            <div><div class="t">Cliente SRL</div><div class="d">Nombre / razón social</div></div>
+            <div><div class="t">CLIENTE SRL</div><div class="d">Nombre / razón social</div></div>
             <button class="end link" onclick="toast('Editar razón social (demo)')">Editar</button>
           </div>
           <div class="set-row">
@@ -595,7 +618,7 @@
           <div class="eyebrow" style="margin-bottom:4px">Nube</div>
           <div class="set-row">
             <div class="ico">▲</div>
-            <div><div class="t">Google Drive</div><div class="d">cuenta@gmail.com</div></div>
+            <div><div class="t">Google Drive</div><div class="d">correo@cliente.com</div></div>
             <span class="end chip ok"><span class="dot"></span>conectado</span>
           </div>
           <div class="set-row">
@@ -641,7 +664,7 @@
         </div>
         <div style="text-align:center; padding:4px 0 2px">
           <span class="tcb-logo" style="width:72px;height:26px; filter:invert(.88) hue-rotate(180deg) saturate(.6)" role="img" aria-label="TCB"></span>
-          <div style="font-size:11px; color:var(--faint); margin-top:4px">TCB FotoGastos · © TCB — Tax Consulting Business<br>Empresa cliente: Cliente SRL</div>
+          <div style="font-size:11px; color:var(--faint); margin-top:4px">TCB FotoGastos · © TCB — Tax Consulting Business<br>Empresa cliente: CLIENTE SRL</div>
         </div>
       </div>
     </section>
@@ -669,19 +692,19 @@
   // ---------- factura simulada (contenido compartido) ----------
   const receiptHTML = `
     <div class="logo">COMERCIO<br>EJEMPLO<br>SRL</div>
-    <div class="c">Comercio Ejemplo S.R.L<br>Calle Ejemplo No. 1<br>RNC: 100000000</div>
+    <div class="c">Comercio Ejemplo SRL<br>Av. Principal No. 1<br>RNC: 000000000</div>
     <h4>FACTURA PARA<br>CRÉDITO FISCAL</h4>
     <div class="row"><span>Fecha</span><span>11 jun. 2025 15:42</span></div>
-    <div class="row"><span>NCF</span><span>B0100000000</span></div>
+    <div class="row"><span>NCF</span><span>B0100000010</span></div>
     <div class="row"><span>Válido hasta</span><span>2025-12-31</span></div>
     <div class="row"><span>RNC</span><span>000000000</span></div>
     <div class="row"><span>Nombre</span><span>CLIENTE SRL</span></div>
     <div class="sep"></div>
-    <div class="row"><span>PRODUCTO A</span><span>1,650.00</span></div>
-    <div class="row"><span>PRODUCTO B</span><span>900.00</span></div>
-    <div class="row"><span>PRODUCTO C</span><span>60.00</span></div>
-    <div class="row"><span>PRODUCTO D</span><span>140.00</span></div>
-    <div class="row"><span>PRODUCTO E</span><span>160.00</span></div>
+    <div class="row"><span>PICAÑA GRUPAL 2LB</span><span>1,650.00</span></div>
+    <div class="row"><span>GRILLADA DEL MAR</span><span>900.00</span></div>
+    <div class="row"><span>COCA COLA 500ML</span><span>60.00</span></div>
+    <div class="row"><span>HELADOS VARIADOS</span><span>140.00</span></div>
+    <div class="row"><span>CAFÉ CON LECHE ×2</span><span>160.00</span></div>
     <div class="sep"></div>
     <div class="row"><span>Subtotal</span><span>2,910.00</span></div>
     <div class="row"><span>ITBIS</span><span>523.80</span></div>
@@ -767,6 +790,7 @@
   // ---------- importación en lote ----------
   const batchNames = ['Compra_020','Compra_021','Compra_050','Compra_060','Compra_112','Compra_170','Compra_171'];
   const batchDates = ['02 jun','02 jun','05 jun','06 jun','11 jun','17 jun','17 jun'];
+  const DUP_INDEX = 4; // Compra_112 repite el NCF de Compra_110 (demo)
   let batch = null;
   function startImport(){
     batch = { i: 0, total: batchNames.length };
@@ -778,6 +802,9 @@
     const bar = document.getElementById('batch-bar');
     if (!batch){
       bar.style.display = 'none';
+      document.getElementById('dup-banner').classList.remove('show');
+      document.getElementById('dup-skip').style.display = 'none';
+      setDupChip(false);
       document.getElementById('rev-file').textContent = 'Compra_110.jpg → CLIENTE_Gastos / 2025-06_Junio';
       document.getElementById('confirm-btn').textContent = 'Confirmar y subir · Compra_110.jpg';
       return;
@@ -788,9 +815,36 @@
       .map((_,k) => `<span class="bdot ${k < batch.i ? 'done' : k === batch.i ? 'cur' : ''}"></span>`).join('');
     document.getElementById('rev-file').textContent =
       `${batchNames[batch.i]}.jpg · importada · ${batchDates[batch.i]} → 2025-06_Junio`;
-    document.getElementById('confirm-btn').textContent =
-      `Confirmar y subir · ${batchNames[batch.i]} (${batch.i+1}/${batch.total})`;
+    const isDup = batch.i === DUP_INDEX;
+    setDupChip(isDup);
+    document.getElementById('dup-banner').classList.toggle('show', isDup);
+    document.getElementById('dup-skip').style.display = isDup ? 'flex' : 'none';
+    document.getElementById('confirm-btn').textContent = isDup
+      ? `Subir de todos modos · ${batchNames[batch.i]} (${batch.i+1}/${batch.total})`
+      : `Confirmar y subir · ${batchNames[batch.i]} (${batch.i+1}/${batch.total})`;
     document.querySelector('#scr-revision .scroll').scrollTop = 0;
+  }
+  function setDupChip(isDup){
+    const chip = document.getElementById('chip-dup');
+    chip.className = 'chip ' + (isDup ? 'warn' : 'ok');
+    chip.style.color = isDup ? '#F1877A' : '';
+    chip.style.borderColor = isDup ? 'rgba(224,101,87,.5)' : '';
+    chip.style.background = isDup ? 'rgba(224,101,87,.1)' : '';
+    chip.innerHTML = '<span class="dot"></span>' + (isDup ? 'Factura Duplicada — NCF ya existe' : 'Sin duplicados en el mes');
+  }
+  function skipDup(){
+    if (!batch) return;
+    const name = batchNames[batch.i];
+    batch.i++;
+    if (batch.i < batch.total){
+      toast(`Descartada: ${name}.jpg (Factura Duplicada)`);
+      renderBatch();
+    } else {
+      const total = batch.total;
+      batch = null; renderBatch();
+      show('gastos');
+      toast(`Lote completo: ${total-1} subidas, 1 descartada por duplicada`);
+    }
   }
 
   // ---------- confirmar y subir ----------
@@ -825,3 +879,5 @@
     }, reduced ? 0 : 1200);
   }
 </script>
+
+</html>

@@ -51,7 +51,13 @@ Además de la cámara, la app permite subir facturas que ya existen como imagen 
 
 - Se extraen: **Fecha de emisión** (nunca "Válido hasta"/"Fecha de vencimiento"), Total, NCF, RNC del emisor, Subtotal, ITBIS.
 - Tarjeta editable de confirmación de un toque antes de subir.
-- Validaciones en la tarjeta: formato de NCF (serie B + tipo), fecha de emisión dentro de la vigencia, y **detección de duplicados** por NCF contra el índice del mes.
+- Validaciones en la tarjeta: formato de NCF (serie B + tipo), fecha de emisión dentro de la vigencia, y **detección de duplicados** por NCF contra el índice del mes (ver §4b).
+
+## 4b. Verificación de duplicados
+
+- **Con conexión:** al confirmar una factura (cámara o importación), la app compara su NCF contra el índice `_gastos.json` del mes. Si ya existe, muestra la alerta **"Factura Duplicada"** indicando con cuál archivo existente coincide (nombre y fecha), con dos opciones: *Descartar* o *Subir de todos modos* (queda marcada como duplicada en el índice).
+- **Sin conexión (cola):** la verificación definitiva ocurre al subir desde la cola. La factura sube y aparece en **Recientes resaltada en rojo** con la etiqueta "Duplicada de {archivo}", para que la empresa la revise y decida eliminarla o conservarla. (El chequeo local contra el índice cacheado se hace igualmente al encolar, pero otro usuario pudo haber subido la misma factura entretanto, por eso se re-verifica en la subida.)
+- Las facturas marcadas como duplicadas se **excluyen por defecto** del PDF y del Excel 606 al generar el documento, con aviso de cuántas quedaron fuera.
 - Si el OCR falla, los campos quedan vacíos para captura manual; nunca bloquea.
 
 ## 5. Híbrido Gemini (anti-errores)
