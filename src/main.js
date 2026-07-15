@@ -233,7 +233,7 @@ inpClient.addEventListener('change', () => set('clientId', inpClient.value.trim(
 inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.value.trim() || 'Gastos_NCF'); set('carpetaRaizId', null); });
 
 // Conexión a Google Drive (Task 9)
-import { initAuth, conectar, conectado, asegurarCarpeta } from './drive.js';
+import { initAuth, conectar, conectado, asegurarCarpeta, listarNombres, subirJPEG } from './drive.js';
 
 document.getElementById('btn-conectar').addEventListener('click', async () => {
   const btn = document.getElementById('btn-conectar');
@@ -249,6 +249,7 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
       `Conectado ✓ — carpeta «${get('carpetaRaiz', 'Gastos_NCF')}» lista`;
     document.getElementById('gastos-sub').textContent = 'Google Drive · conectado';
     toast('Google Drive conectado');
+    refrescarGastos();
   } catch(e){
     console.error(e);
     toast('No se pudo conectar: ' + e.message);
@@ -256,3 +257,54 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+
+// Confirmar y subir + pantalla Gastos (Task 10)
+import { nombreCarpetaMes, siguienteNombre, hoyISO } from './naming.js';
+import { canvasAJpeg } from './process.js';
+
+async function subirFactura(blob, fechaISO){
+  const raizId = get('carpetaRaizId');
+  if (!conectado() || !raizId) throw new Error('sin-conexion');
+  const mesId = await asegurarCarpeta(nombreCarpetaMes(fechaISO), raizId);
+  const nombre = siguienteNombre(fechaISO, await listarNombres(mesId));
+  await subirJPEG(blob, nombre, mesId);
+  return nombre;
+}
+
+document.getElementById('confirm-btn').addEventListener('click', async () => {
+  const res = window.__resultado;
+  if (!res) return;
+  const canvas = res.canvasProcesado || res.canvasOriginal;
+  const btn = document.getElementById('confirm-btn');
+  btn.disabled = true; btn.textContent = 'Subiendo…';
+  try {
+    const blob = await canvasAJpeg(canvas);
+    const nombre = await subirFactura(blob, hoyISO());
+    toast(`Subida: ${nombre} ✓`);
+    show('gastos');
+    refrescarGastos();
+  } catch(e){
+    console.error(e);
+    toast(e.message === 'sin-conexion'
+      ? 'Sin conexión a Drive — conecta en Ajustes'   // Task 11 la encola aquí
+      : 'Error al subir: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = 'Confirmar y subir';
+  }
+});
+
+async function refrescarGastos(){
+  const raizId = get('carpetaRaizId');
+  const carpetaMes = nombreCarpetaMes(hoyISO());
+  document.getElementById('mes-nombre').textContent = carpetaMes;
+  if (!conectado() || !raizId) return;
+  try {
+    const mesId = await asegurarCarpeta(carpetaMes, raizId);
+    const nombres = (await listarNombres(mesId)).filter(n => /^Compra_/i.test(n)).sort().reverse();
+    document.getElementById('mes-meta').textContent = `${nombres.length} facturas este mes`;
+    document.getElementById('lista-mes').innerHTML = nombres.map(n =>
+      `<div class="inv"><div class="thumb">JPG</div><div><div class="nm num">${n}</div></div></div>`).join('')
+      || '<div class="gem-note">Aún no hay facturas este mes.</div>';
+  } catch(e){ console.error(e); }
+}
+document.getElementById('tab-gastos').addEventListener('click', refrescarGastos);
