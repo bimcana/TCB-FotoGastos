@@ -8,7 +8,7 @@ Prototipo de interfaz de **TCB FotoGastos**, una PWA de **TCB — Tax Consulting
 
 En iPhone: abrir en Safari → Compartir → **Añadir a pantalla de inicio**.
 
-> Estado: **Fase 1 funcional** — captura con auto-disparo, ortofoto fondo 254 y subida a Google Drive. La maqueta de referencia sigue en `/prototipo/`.
+> Estado: **Fase 1.5A** — detección del papel por región (Otsu + morfología, más robusta que bordes), auto-color (fondo blanco, tinta oscura, conserva color) y guarda anti-basura (ofrece ajuste manual si no detecta bien). Sobre la Fase 1 (auto-disparo + subida a Google Drive). La maqueta de referencia sigue en `/prototipo/`.
 >
 > Al desplegar cambios, sube la constante VERSION de sw.js para que los usuarios reciban la actualización.
 
