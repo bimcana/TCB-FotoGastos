@@ -8,7 +8,7 @@ Prototipo de interfaz de **TCB FotoGastos**, una PWA de **TCB — Tax Consulting
 
 En iPhone: abrir en Safari → Compartir → **Añadir a pantalla de inicio**.
 
-> Estado: **Fase 1.5C** — pantalla "Procesando…" con spinner y auto-color acelerado (estimación de fondo reducida); 4 modos de imagen (Auto-color, Blanco y negro, Escala de grises, Original) con deslizador de intensidad en Revisión y modo/intensidad por defecto en Ajustes. Sobre 1.5B (auto-disparo por región + auto-color local tipo Adobe), 1.5A (detección por región) y la Fase 1 (subida a Google Drive). La maqueta de referencia sigue en `/prototipo/`.
+> Estado: **Fase 2A** — OCR con Gemini (`gemini-2.5-flash`): al capturar, lee fecha de emisión, NCF, RNC emisor, ITBIS y total en una tarjeta de confirmación editable; archiva por la fecha de emisión, registra los metadatos en `_gastos.json` en la carpeta del mes y detecta duplicados por NCF. Requiere pegar la API key de Gemini en Ajustes. Sobre las fases 1.5 (captura + auto-color + 4 modos + visor) y la Fase 1 (Google Drive). La maqueta de referencia sigue en `/prototipo/`.
 >
 > Al desplegar cambios, sube la constante VERSION de sw.js para que los usuarios reciban la actualización.
 

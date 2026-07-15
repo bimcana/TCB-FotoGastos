@@ -1,8 +1,9 @@
-const VERSION = 'fase1.5d-v1';
+const VERSION = 'fase2a-v1';
 const PRECACHE = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'src/main.js', 'src/camera.js', 'src/detect.js', 'src/cvready.js',
   'src/process.js', 'src/enhance.js', 'src/naming.js', 'src/settings.js', 'src/drive.js', 'src/queue.js',
+  'src/gemini.js', 'src/validacion.js', 'src/indice.js',
   'vendor/opencv.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
 

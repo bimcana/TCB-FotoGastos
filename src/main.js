@@ -459,6 +459,10 @@ inpCarpeta.value = get('carpetaRaiz', 'Gastos_NCF');
 inpClient.addEventListener('change', () => set('clientId', inpClient.value.trim()));
 inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.value.trim() || 'Gastos_NCF'); set('carpetaRaizId', null); });
 
+const inpGemini = document.getElementById('inp-gemini');
+inpGemini.value = get('geminiKey', '');
+inpGemini.addEventListener('change', () => set('geminiKey', inpGemini.value.trim()));
+
 // Conexión a Google Drive (Task 9)
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON } from './drive.js';
 
