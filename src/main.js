@@ -406,6 +406,76 @@ esqCanvas.addEventListener('pointerup', soltar);
 
 import { cvReady } from './cvready.js';
 import { detectarDocumento, esEstable, nitidezRegion, ordenarEsquinas } from './detect.js';
+import { archivoACanvas } from './importar.js';
+
+// ---------- Importación en lote (Fase 2B) ----------
+// Recorre las imágenes elegidas de la galería una por una por el mismo pipeline
+// (ortofoto + auto-color + OCR + confirmación) que una foto de cámara.
+function actualizarBarraLote(){
+  const bar = document.getElementById('lote-bar');
+  if (!window.__lote){ bar.hidden = true; return; }
+  const { files, i } = window.__lote;
+  bar.hidden = false;
+  document.getElementById('lote-txt').textContent = `Importación en lote — validando ${i + 1} de ${files.length}`;
+  document.getElementById('lote-dots').innerHTML = files
+    .map((_, k) => `<span class="d ${k < i ? 'hecha' : k === i ? 'actual' : ''}"></span>`).join('');
+}
+
+async function cargarSiguienteDelLote(){
+  const lote = window.__lote;
+  if (!lote){ return; }
+  if (lote.i >= lote.files.length){ // lote terminado
+    window.__lote = null;
+    actualizarBarraLote();
+    show('gastos');
+    refrescarGastos();
+    return;
+  }
+  actualizarBarraLote();
+  try {
+    const canvas = await archivoACanvas(lote.files[lote.i]);
+    const esquinas = detectarDocumento(canvas);
+    window.__captura = { canvas, esquinas };
+    procesarYRevisar();
+  } catch(e){
+    console.error(e);
+    toast('No se pudo abrir una imagen; se omite');
+    window.__lote.i++;
+    cargarSiguienteDelLote();
+  }
+}
+
+async function importarLote(files){
+  if (!files || !files.length) return;
+  await cvReady();
+  window.__lote = { files, i: 0 };
+  cargarSiguienteDelLote();
+}
+
+// En lote, tras subir/encolar cada factura avanza a la siguiente; si no, va al destino normal.
+function avanzarLoteOIr(destino){
+  if (window.__lote){
+    window.__lote.i++;
+    cargarSiguienteDelLote();
+  } else {
+    show(destino);
+    if (destino === 'gastos') refrescarGastos();
+  }
+}
+
+// Cancelar el lote (p. ej. al volver a Cámara desde Revisión a mitad de la validación).
+function cancelarLoteYVolver(){
+  if (window.__lote){ window.__lote = null; actualizarBarraLote(); }
+  show('camara');
+}
+window.cancelarLoteYVolver = cancelarLoteYVolver;
+
+document.getElementById('btn-importar').addEventListener('click', () => document.getElementById('file-import').click());
+document.getElementById('file-import').addEventListener('change', (ev) => {
+  const files = [...ev.target.files];
+  ev.target.value = ''; // permite volver a elegir los mismos archivos luego
+  importarLote(files);
+});
 
 const overlay = document.getElementById('cam-overlay');
 let ultimasEsquinas = null;
@@ -574,14 +644,13 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
       await encolar({ blob, datos });
       toast('Subida en curso — factura añadida a la cola');
       actualizarBadge();
-      show('camara');
+      avanzarLoteOIr('camara');
       return;
     }
     colaEnProceso = true; lockAdquirido = true;
     const { nombre, duplicada } = await subirFactura(blob, datos);
     toast(duplicada ? `Subida: ${nombre} — marcada como DUPLICADA (revísala en Gastos)` : `Subida: ${nombre} ✓`);
-    show('gastos');
-    refrescarGastos();
+    avanzarLoteOIr('gastos');
   } catch(e){
     console.error(e);
     if (e.message === 'sin-conexion'){
@@ -589,7 +658,7 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
       toast('Sin conexión con Drive — en cola; reconecta en Ajustes para subirla');
       document.getElementById('gastos-sub').textContent = 'Google Drive · reconectar en Ajustes';
       actualizarBadge();
-      show('camara');
+      avanzarLoteOIr('camara');
     } else {
       toast('Error al subir: ' + e.message);
     }

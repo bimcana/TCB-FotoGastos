@@ -1,10 +1,10 @@
-const VERSION = 'fase2a1-v3';
+const VERSION = 'fase2b-v1';
 // Los binarios de vendor/tesseract/ NO se precachean (varios MB): se cachean al usarse.
 const PRECACHE = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'src/main.js', 'src/camera.js', 'src/detect.js', 'src/cvready.js',
   'src/process.js', 'src/enhance.js', 'src/naming.js', 'src/settings.js', 'src/drive.js', 'src/queue.js',
-  'src/gemini.js', 'src/validacion.js', 'src/indice.js', 'src/ocrlocal.js',
+  'src/gemini.js', 'src/validacion.js', 'src/indice.js', 'src/ocrlocal.js', 'src/importar.js',
   'vendor/opencv.js', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/apple-touch-icon.png'
 ];
 
