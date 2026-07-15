@@ -31,3 +31,34 @@ setTheme((() => { try { return localStorage.getItem('tcb-theme') || 'dark'; } ca
 // Globales para los onclick del HTML
 window.show = show;
 window.toast = toast;
+
+import { iniciarCamara, capturarFrame } from './camera.js';
+
+const video = document.getElementById('cam-video');
+const statusTxt = document.getElementById('cam-status-txt');
+
+iniciarCamara(video)
+  .then(() => { statusTxt.textContent = 'Buscando documento…'; })
+  .catch(err => {
+    statusTxt.textContent = 'Sin acceso a la cámara';
+    toast('Permite el acceso a la cámara para capturar facturas');
+    console.error(err);
+  });
+
+document.getElementById('shutter').addEventListener('click', () => {
+  if (!video.videoWidth) return toast('La cámara no está lista');
+  const canvas = capturarFrame(video);
+  window.__captura = { canvas, esquinas: null };
+  const fx = document.getElementById('flashfx');
+  fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
+  mostrarRevision(canvas);
+});
+
+function mostrarRevision(canvas){
+  const rev = document.getElementById('rev-canvas');
+  rev.width = canvas.width; rev.height = canvas.height;
+  rev.getContext('2d').drawImage(canvas, 0, 0);
+  document.getElementById('rev-file').textContent = 'Captura sin procesar';
+  show('revision');
+}
+window.mostrarRevision = mostrarRevision;
