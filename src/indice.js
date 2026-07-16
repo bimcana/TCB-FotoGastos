@@ -22,3 +22,8 @@ export function agregarEntrada(indice, entrada){
   const base = (indice && Array.isArray(indice.facturas)) ? indice : { facturas: [] };
   return { ...base, facturas: [...base.facturas, entrada] };
 }
+
+export function quitarEntrada(indice, archivo){
+  const base = (indice && Array.isArray(indice.facturas)) ? indice : { facturas: [] };
+  return { ...base, facturas: base.facturas.filter(f => f.archivo !== archivo) };
+}

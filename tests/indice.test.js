@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { entradaDeFactura, agregarEntrada } from '../src/indice.js';
+import { entradaDeFactura, agregarEntrada, quitarEntrada } from '../src/indice.js';
+
+test('quitarEntrada elimina por nombre de archivo sin mutar', () => {
+  const idx = { facturas: [{ archivo: 'a.jpg' }, { archivo: 'b.jpg' }] };
+  const out = quitarEntrada(idx, 'a.jpg');
+  assert.deepEqual(out.facturas.map(f => f.archivo), ['b.jpg']);
+  assert.equal(idx.facturas.length, 2);
+});
+
+test('quitarEntrada tolera indice nulo', () => {
+  assert.deepEqual(quitarEntrada(null, 'a.jpg'), { facturas: [] });
+});
 
 test('entradaDeFactura normaliza campos', () => {
   const e = entradaDeFactura('Compra_110.jpg',
