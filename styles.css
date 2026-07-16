@@ -523,3 +523,23 @@ html[data-theme="light"] #batch-count{color:#16202B}
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important; transition:none!important}
 }
+
+/* --- Fase 2D: editor de esquinas a pantalla completa --- */
+.esq-editor{
+  position:absolute; inset:0; z-index:70; background:rgba(4,8,16,.97);
+  display:flex; flex-direction:column;
+}
+.esq-editor[hidden]{display:none}
+.esq-stage{
+  position:relative; flex:1; display:flex; align-items:center; justify-content:center;
+  overflow:hidden; padding:calc(14px + env(safe-area-inset-top)) 14px 8px; min-height:0;
+}
+#esq-canvas{ max-width:100%; max-height:100%; touch-action:none; border-radius:4px; }
+.esq-lupa{
+  position:absolute; width:132px; height:132px; border-radius:50%;
+  border:2px solid #4E9BEB; box-shadow:0 8px 24px rgba(0,0,0,.5);
+  pointer-events:none; background:#000; z-index:72;
+}
+.esq-lupa[hidden]{display:none}
+.esq-acciones{ display:flex; gap:10px; padding:12px 16px calc(12px + env(safe-area-inset-bottom)); }
+.esq-acciones .btn{ flex:1; margin:0; }
