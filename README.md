@@ -8,7 +8,7 @@ Prototipo de interfaz de **TCB FotoGastos**, una PWA de **TCB — Tax Consulting
 
 En iPhone: abrir en Safari → Compartir → **Añadir a pantalla de inicio**.
 
-> Estado: **Fase 2C.2** — revisor con Gemini: las facturas subidas incompletas o leídas con OCR local quedan "Pendiente de revisión"; al abrir la app con conexión + API key, Gemini las re-lee y completa (una PWA no procesa con la app cerrada). Tocar una factura por revisar en Gastos abre un panel editable para confirmarla. Sobre la **Fase 2B** (importación en lote) y la 2A (OCR).
+> Estado: **Fase 2D** — guardar sin esperar a la IA: «Confirmar y subir» funciona durante la lectura; la factura sube provisional (`Pendiente_…`) y el revisor en background la re-lee, la renombra a `Compra_DDN.jpg` y la mueve a su carpeta de mes al conocer la fecha de emisión. Toggle **IA/OCR** en la tarjeta de datos (OCR cancela a Gemini si se demora). En Gastos, TODAS las facturas se abren y editan (con miniatura); cambiar la fecha re-archiva igual. Detección de esquinas en cascada (Otsu → adaptativa → Canny) para importaciones con fondos difíciles, y editor de esquinas a **pantalla completa con lupa** estilo Adobe Scan. Sobre la **Fase 2C.2** (revisor con Gemini), la 2B (lote) y la 2A (OCR).
 >
 > Al desplegar cambios, sube la constante VERSION de sw.js para que los usuarios reciban la actualización.
 

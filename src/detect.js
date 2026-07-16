@@ -76,6 +76,40 @@ function binCanny(gray){
   return th;
 }
 
+// Intenta reducir un contorno a 4 esquinas: primero el contorno directo y, si sale con
+// mas vertices (bordes ondulados, esquinas redondeadas), su casco convexo con epsilon
+// creciente. La guarda de solidez evita dar por recibo una madeja de bordes fusionados
+// (p. ej. papel + brillo del fondo unidos por el dilate), cuyo casco seria basura.
+function aCuatroEsquinas(c, area){
+  let approx = new cv.Mat();
+  try {
+    cv.approxPolyDP(c, approx, 0.02 * cv.arcLength(c, true), true);
+    if (approx.rows === 4 && cv.isContourConvex(approx)) return leerPuntos(approx);
+  } finally { approx.delete(); }
+  let hull;
+  try {
+    hull = new cv.Mat();
+    cv.convexHull(c, hull);
+    if (area / cv.contourArea(hull) < 0.8) return null; // poco solido: no es un papel
+    const per = cv.arcLength(hull, true);
+    for (const e of [0.02, 0.04, 0.08]){
+      const ap = new cv.Mat();
+      try {
+        cv.approxPolyDP(hull, ap, e * per, true);
+        if (ap.rows === 4 && cv.isContourConvex(ap)) return leerPuntos(ap);
+      } finally { ap.delete(); }
+    }
+    return null;
+  } finally { if (hull) hull.delete(); }
+}
+
+function leerPuntos(approx){
+  const pts = [];
+  for (let j = 0; j < 4; j++)
+    pts.push({ x: approx.data32S[j * 2], y: approx.data32S[j * 2 + 1] });
+  return pts;
+}
+
 // Mayor cuadrilatero convexo del binario, en coords del canvas ORIGINAL (o null).
 function cuadrilateroDeBinaria(th, escala, minArea){
   let contours, hier;
@@ -85,22 +119,18 @@ function cuadrilateroDeBinaria(th, escala, minArea){
     cv.findContours(th, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
     let mejor = null, mejorArea = minArea;
     for (let i = 0; i < contours.size(); i++){
-      let c, approx;
+      let c;
       try {
         c = contours.get(i);
         const area = cv.contourArea(c);
         if (area > mejorArea){
-          approx = new cv.Mat();
-          cv.approxPolyDP(c, approx, 0.02 * cv.arcLength(c, true), true);
-          if (approx.rows === 4 && cv.isContourConvex(approx)){
-            const pts = [];
-            for (let j = 0; j < 4; j++)
-              pts.push({ x: approx.data32S[j * 2] / escala, y: approx.data32S[j * 2 + 1] / escala });
-            mejorArea = area; mejor = pts;
+          const pts = aCuatroEsquinas(c, area);
+          if (pts){
+            mejorArea = area;
+            mejor = pts.map(p => ({ x: p.x / escala, y: p.y / escala }));
           }
         }
       } finally {
-        if (approx) approx.delete();
         if (c) c.delete();
       }
     }
