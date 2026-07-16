@@ -48,6 +48,16 @@ export function nombreUnico(nombre, existentes){
   return `${base}_${i}.jpg`;
 }
 
+// Meses disponibles para el selector de Gastos, a partir de las carpetas AAAA-MM_Mes
+// que existen en la raiz de Drive; el mes de HOY siempre esta aunque no tenga carpeta.
+export function mesesDeCarpetas(nombres, hoyISOStr){
+  const meses = new Set((nombres || [])
+    .map(n => { const m = String(n).match(/^(\d{4}-\d{2})_/); return m ? m[1] : null; })
+    .filter(Boolean));
+  if (hoyISOStr) meses.add(String(hoyISOStr).slice(0, 7));
+  return [...meses].sort();
+}
+
 export function necesitaReArchivo(nombreArchivo, carpetaActual, fechaISO){
   if (!fechaISO) return false;
   if (esProvisional(nombreArchivo)) return true;

@@ -1,7 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
-         nombreProvisional, esProvisional, nombreCoincideConFecha, nombreUnico, necesitaReArchivo } from '../src/naming.js';
+         nombreProvisional, esProvisional, nombreCoincideConFecha, nombreUnico, necesitaReArchivo,
+         mesesDeCarpetas } from '../src/naming.js';
+
+test('mesesDeCarpetas: unicos, ordenados, incluye el mes actual', () => {
+  const nombres = ['2025-06_Junio', '2026-07_Julio', '2025-06_Junio', 'Gastos_x.pdf'];
+  assert.deepEqual(mesesDeCarpetas(nombres, '2026-08-01'), ['2025-06', '2026-07', '2026-08']);
+  assert.deepEqual(mesesDeCarpetas([], '2026-07-16'), ['2026-07']);
+});
 
 test('carpeta de junio 2025', () => {
   assert.equal(nombreCarpetaMes('2025-06-11'), '2025-06_Junio');
