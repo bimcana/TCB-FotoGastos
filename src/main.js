@@ -792,6 +792,58 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
   }
 });
 
+// Panel de cola de subida (Fase 2E): ver, reintentar y eliminar lo que espera Drive.
+let colaURLs = [];
+async function abrirCola(){
+  const lista = document.getElementById('cola-lista');
+  colaURLs.forEach(u => URL.revokeObjectURL(u)); colaURLs = [];
+  lista.innerHTML = '';
+  const items = await pendientes();
+  document.getElementById('cola-subir').disabled = !items.length;
+  if (!items.length){
+    lista.innerHTML = '<div class="gem-note">Nada en cola — todo está en Drive.</div>';
+  }
+  for (const it of items){
+    const fila = document.createElement('div');
+    fila.className = 'cola-item';
+    const img = document.createElement('img');
+    const u = URL.createObjectURL(it.blob); colaURLs.push(u);
+    img.src = u; img.alt = 'Miniatura';
+    const d = it.datos || {};
+    const partes = [d.nombreComercio, normalizarFecha(d.fechaEmision),
+      d.total != null ? 'RD$ ' + Number(d.total).toLocaleString('es-DO', { minimumFractionDigits: 2 }) : null];
+    const info = document.createElement('div');
+    info.className = 'cola-info';
+    info.innerHTML = '<b class="num"></b><span>Esperando conexión con Drive</span>';
+    info.querySelector('b').textContent = partes.filter(Boolean).join(' · ') || 'Sin datos leídos';
+    const del = document.createElement('button');
+    del.className = 'cola-borrar'; del.textContent = '🗑';
+    del.setAttribute('aria-label', 'Eliminar de la cola');
+    del.addEventListener('click', async () => {
+      if (!confirm('¿Eliminar esta factura de la cola? La foto se descartará (aún no está en Drive).')) return;
+      await eliminar(it.id);
+      actualizarBadge();
+      abrirCola(); // re-render
+    });
+    fila.appendChild(img); fila.appendChild(info); fila.appendChild(del);
+    lista.appendChild(fila);
+  }
+  document.getElementById('cola-panel').hidden = false;
+}
+function cerrarCola(){
+  document.getElementById('cola-panel').hidden = true;
+  colaURLs.forEach(u => URL.revokeObjectURL(u)); colaURLs = [];
+}
+document.getElementById('btn-cola').addEventListener('click', abrirCola);
+document.getElementById('cola-cerrar').addEventListener('click', cerrarCola);
+document.getElementById('cola-subir').addEventListener('click', async () => {
+  if (!conectado()) return toast('Sin conexión con Drive — usa "Reconectar" en Gastos');
+  cerrarCola();
+  await procesarCola();
+  refrescarGastosSiVisible();
+  toast('Cola procesada');
+});
+
 async function actualizarBadge(){
   const n = await cuenta();
   const b = document.getElementById('cola-badge');
