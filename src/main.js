@@ -37,7 +37,8 @@ import { procesar, aplicarRealce, canvasAJpeg } from './process.js';
 import { get, set } from './settings.js';
 import { extraerDatos } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
-import { ncfValido, normalizarFecha, buscarDuplicado, montoValido } from './validacion.js';
+import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta } from './validacion.js';
+import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
 
 // Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
 // es síncrono, no hay await que ceda el hilo). Con doble rAF nos aseguramos de que el
@@ -316,7 +317,10 @@ function abrirVisor(){
   visorImg.src = rev.toDataURL('image/jpeg', 0.92);
   visor.hidden = false;
 }
-function cerrarVisor(){ visor.hidden = true; visorImg.removeAttribute('src'); }
+function cerrarVisor(){
+  if (visorImg.src.startsWith('blob:')) URL.revokeObjectURL(visorImg.src); // liberar el blob de "Ver imagen"
+  visor.hidden = true; visorImg.removeAttribute('src');
+}
 document.getElementById('rev-canvas').addEventListener('click', abrirVisor);
 document.getElementById('visor-cerrar').addEventListener('click', cerrarVisor);
 visor.addEventListener('click', (ev) => { if (ev.target === visor) cerrarVisor(); }); // toque en el fondo cierra
@@ -571,7 +575,7 @@ modeloEl.addEventListener('click', (ev) => {
 });
 
 // Conexión a Google Drive (Task 9)
-import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON } from './drive.js';
+import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen } from './drive.js';
 
 document.getElementById('btn-conectar').addEventListener('click', async () => {
   const btn = document.getElementById('btn-conectar');
@@ -589,6 +593,7 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
     toast('Google Drive conectado');
     refrescarGastos();
     procesarCola();
+    revisarPendientes(); // re-lee con Gemini las facturas pendientes al conectar
   } catch(e){
     console.error(e);
     toast('No se pudo conectar: ' + e.message);
@@ -607,23 +612,39 @@ import { encolar, pendientes, eliminar, cuenta } from './queue.js';
 // la fecha del dispositivo), registra metadatos y marca duplicados sin bloquear la subida.
 import { agregarEntrada, entradaDeFactura } from './indice.js';
 
-async function subirFactura(blob, datos){
-  const raizId = get('carpetaRaizId');
-  if (!conectado() || !raizId) throw new Error('sin-conexion');
-  const fechaISO = normalizarFecha(datos.fechaEmision) || hoyISO(); // respaldo: fecha del dispositivo
-  const mesId = await asegurarCarpeta(nombreCarpetaMes(fechaISO), raizId);
-  const idx = await leerJSON(mesId, '_gastos.json');
-  // Re-chequeo definitivo contra el índice actual (cubre reintentos de la cola offline,
-  // donde el duplicado pudo registrarse después de que la factura se encoló).
-  const dup = buscarDuplicado(idx, datos.ncf);
-  const nombre = siguienteNombre(fechaISO, await listarNombres(mesId));
-  await subirJPEG(blob, nombre, mesId);
-  // El índice registra la fecha REALMENTE usada para archivar (fechaISO), no el texto crudo:
-  // si el OCR dio una fecha no parseable y se usó el respaldo (hoy), el índice coincide con
-  // la carpeta donde quedó el archivo — trazabilidad fiscal correcta.
-  const entrada = entradaDeFactura(nombre, { ...datos, fechaEmision: fechaISO }, datos.origen || 'manual', !!dup);
-  await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada));
-  return { nombre, duplicada: !!dup, duplicadaDe: dup ? dup.archivo : null };
+// Mutex que serializa TODAS las escrituras a _gastos.json (subida, revisor con Gemini y
+// confirmación del usuario): cada una hace su read-modify-write sin que otra la pise
+// entre medias, evitando perder entradas del índice del 606.
+let _lockIndice = Promise.resolve();
+function conLockIndice(fn){
+  const corrida = _lockIndice.then(fn, fn);
+  _lockIndice = corrida.catch(() => {});
+  return corrida;
+}
+
+function subirFactura(blob, datos){
+  return conLockIndice(async () => {
+    const raizId = get('carpetaRaizId');
+    if (!conectado() || !raizId) throw new Error('sin-conexion');
+    const fechaISO = normalizarFecha(datos.fechaEmision) || hoyISO(); // respaldo: fecha del dispositivo
+    const mesId = await asegurarCarpeta(nombreCarpetaMes(fechaISO), raizId);
+    const idx = await leerJSON(mesId, '_gastos.json');
+    // Re-chequeo definitivo contra el índice actual (cubre reintentos de la cola offline,
+    // donde el duplicado pudo registrarse después de que la factura se encoló).
+    const dup = buscarDuplicado(idx, datos.ncf);
+    const nombre = siguienteNombre(fechaISO, await listarNombres(mesId));
+    await subirJPEG(blob, nombre, mesId);
+    // El índice registra la fecha REALMENTE usada para archivar (fechaISO), no el texto crudo:
+    // si el OCR dio una fecha no parseable y se usó el respaldo (hoy), el índice coincide con
+    // la carpeta donde quedó el archivo — trazabilidad fiscal correcta.
+    const entrada = entradaDeFactura(nombre, { ...datos, fechaEmision: fechaISO }, datos.origen || 'manual', !!dup);
+    await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada));
+    // Si quedó incompleta o la leyó el OCR local, se guarda para que Gemini la revise luego.
+    if (entrada.estado !== 'completa'){
+      try { await encolarRevision({ blob, mesId, archivo: nombre }); } catch(e){ console.error(e); }
+    }
+    return { nombre, duplicada: !!dup, duplicadaDe: dup ? dup.archivo : null };
+  });
 }
 
 document.getElementById('confirm-btn').addEventListener('click', async () => {
@@ -697,6 +718,55 @@ async function procesarCola(){
 window.addEventListener('online', procesarCola);
 actualizarBadge();
 
+// Revisor con Gemini: al abrir la app con conexión + API key, re-lee las facturas de la
+// cola de revisión (incompletas o de OCR local), rellena con Gemini y las deja "pendiente"
+// (a la espera de que el usuario confirme). Una PWA no corre esto con la app cerrada.
+let revisando = false;
+async function revisarPendientes(){
+  if (revisando || !conectado()) return;
+  const key = get('geminiKey', '');
+  if (!key) return;
+  revisando = true; // síncrono, antes de cualquier await: evita dos corridas en paralelo
+  try {
+    const items = await pendientesRevision();
+    for (const item of items){
+      let canvas;
+      try { canvas = await archivoACanvas(item.blob); }
+      catch(e){ // imagen ilegible: no dejar que bloquee la cola; descartar tras 3 intentos
+        console.error(e);
+        const intentos = (item.intentos || 0) + 1;
+        await eliminarRevision(item.id);
+        if (intentos < 3) await encolarRevision({ blob: item.blob, mesId: item.mesId, archivo: item.archivo, intentos });
+        continue;
+      }
+      let datos = null;
+      try { datos = await extraerDatos(canvas, key, geminiModelo); }
+      catch(e){ console.error(e); break; } // error de red/HTTP con Gemini: reintentar todo luego
+      try {
+        // read-modify-write atómico contra el índice VIGENTE en Drive (no un snapshot viejo)
+        await conLockIndice(async () => {
+          const idx = await leerJSON(item.mesId, '_gastos.json');
+          const f = idx?.facturas?.find(x => x.archivo === item.archivo);
+          if (!f) return; // la entrada ya no existe
+          if (datos){
+            for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'itbis', 'total']){
+              if (datos[c] != null && datos[c] !== '') f[c] = datos[c];
+            }
+          }
+          f.revisadaIA = true;
+          f.estado = facturaCompleta(f) ? 'pendiente' : 'incompleta'; // el usuario confirma después
+          await guardarJSON(item.mesId, '_gastos.json', idx);
+        });
+        await eliminarRevision(item.id);
+      } catch(e){ console.error(e); break; } // fallo de Drive: reintentar en la próxima corrida
+    }
+  } finally {
+    revisando = false;
+    if (document.getElementById('scr-gastos').classList.contains('active')) refrescarGastos();
+  }
+}
+window.addEventListener('online', revisarPendientes);
+
 async function refrescarGastos(){
   const raizId = get('carpetaRaizId');
   const carpetaMes = nombreCarpetaMes(hoyISO());
@@ -711,6 +781,7 @@ async function refrescarGastos(){
       leerJSON(mesId, '_gastos.json').catch(() => null)
     ]);
     const entradaPorArchivo = new Map((idx?.facturas || []).map(f => [f.archivo, f]));
+    window.__gastosMes = { mesId, idx }; // contexto para confirmar una factura pendiente
     const num = n => { const m = n.match(/^Compra_(\d+)/i); return m ? parseInt(m[1], 10) : -1; };
     nombres.sort((a, b) => num(b) - num(a));
     const nPend = (idx?.facturas || []).filter(f => f.estado === 'incompleta' || f.estado === 'pendiente').length;
@@ -748,6 +819,9 @@ async function refrescarGastos(){
           chip.style.cssText = 'margin-top:4px; font-size:10px; padding:2px 8px';
           chip.innerHTML = '<span class="dot"></span>' + est[1];
           amt.appendChild(chip);
+          // las facturas por revisar son tocables: abren el panel de confirmación
+          inv.style.cursor = 'pointer';
+          inv.addEventListener('click', () => abrirRevisar(e.archivo));
         }
         inv.appendChild(thumb); inv.appendChild(info);
         if (amt.childNodes.length) inv.appendChild(amt);
@@ -756,4 +830,70 @@ async function refrescarGastos(){
     }
   } catch(e){ console.error(e); }
 }
-document.getElementById('tab-gastos').addEventListener('click', refrescarGastos);
+document.getElementById('tab-gastos').addEventListener('click', () => { refrescarGastos(); revisarPendientes(); });
+
+// ---------- Confirmación de una factura pendiente (panel de revisión) ----------
+const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-itbis':'itbis','rv-total':'total' };
+let rvArchivo = null;
+
+function abrirRevisar(archivo){
+  const idx = window.__gastosMes?.idx;
+  const f = idx?.facturas?.find(x => x.archivo === archivo);
+  if (!f) return;
+  rvArchivo = archivo;
+  document.getElementById('revisar-titulo').textContent = `Revisar ${archivo}`;
+  for (const [id, campo] of Object.entries(RV_CAMPOS)){
+    document.getElementById(id).value = f[campo] != null ? f[campo] : '';
+  }
+  document.getElementById('revisar-panel').hidden = false;
+}
+function cerrarRevisar(){ document.getElementById('revisar-panel').hidden = true; rvArchivo = null; }
+
+async function confirmarRevision(){
+  const ctx = window.__gastosMes;
+  if (!ctx || !rvArchivo) return;
+  const archivo = rvArchivo;
+  const num = v => { const n = parseFloat(String(v).trim().replace(',', '.')); return Number.isFinite(n) ? n : null; };
+  const edits = {};
+  for (const [id, campo] of Object.entries(RV_CAMPOS)){
+    const v = document.getElementById(id).value.trim();
+    edits[campo] = ['subtotal','itbis','total'].includes(campo) ? num(v) : (v || null);
+  }
+  const btn = document.getElementById('rv-confirmar');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  let estadoFinal = null;
+  try {
+    // Read-modify-write atómico: re-lee el índice fresco de Drive y aplica SOLO esta entrada,
+    // para no pisar cambios que el revisor u otra subida hayan escrito mientras el panel estaba abierto.
+    await conLockIndice(async () => {
+      const idx = await leerJSON(ctx.mesId, '_gastos.json');
+      const f = idx?.facturas?.find(x => x.archivo === archivo);
+      if (!f) throw new Error('La factura ya no está en el índice');
+      Object.assign(f, edits);
+      f.estado = facturaCompleta(f) ? 'completa' : 'incompleta';
+      estadoFinal = f.estado;
+      await guardarJSON(ctx.mesId, '_gastos.json', idx);
+    });
+    toast(estadoFinal === 'completa' ? 'Factura confirmada ✓' : 'Guardada — aún faltan datos');
+    cerrarRevisar();
+    refrescarGastos();
+  } catch(e){ console.error(e); toast('No se pudo guardar: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = 'Confirmar'; }
+}
+
+async function verImagenRevision(){
+  const ctx = window.__gastosMes;
+  if (!ctx || !rvArchivo) return;
+  toast('Cargando imagen…');
+  try {
+    const blob = await descargarImagen(ctx.mesId, rvArchivo);
+    if (!blob) return toast('No se encontró la imagen en Drive');
+    const visorImg = document.getElementById('visor-img');
+    visorImg.src = URL.createObjectURL(blob);
+    document.getElementById('visor').hidden = false;
+  } catch(e){ console.error(e); toast('No se pudo cargar la imagen'); }
+}
+
+document.getElementById('revisar-cerrar').addEventListener('click', cerrarRevisar);
+document.getElementById('rv-confirmar').addEventListener('click', confirmarRevision);
+document.getElementById('rv-ver-imagen').addEventListener('click', verImagenRevision);

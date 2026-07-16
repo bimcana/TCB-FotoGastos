@@ -8,7 +8,7 @@ Prototipo de interfaz de **TCB FotoGastos**, una PWA de **TCB — Tax Consulting
 
 En iPhone: abrir en Safari → Compartir → **Añadir a pantalla de inicio**.
 
-> Estado: **Fase 2C.1** — cada factura en Gastos muestra su estado: "Datos incompletos" (falta Fecha/NCF/RNC/Total) o "Pendiente de revisión" (leída con OCR local). Sobre la **Fase 2B** — importación en lote: el botón de galería (en Cámara) permite elegir varias facturas de la Fototeca/Archivos y las valida una por una ("validando N de M") por el mismo pipeline (ortofoto + auto-color + OCR + confirmación + subida), archivando cada una por su fecha de emisión. Nota iOS: no hay Web Share Target (guardar la imagen en Fototeca y luego importarla). Sobre la **Fase 2A.1** — OCR híbrido. Con API key usa Gemini (modelo elegible en Ajustes: 3.5/3/2.5 Flash, por defecto 3.5 Flash); sin key o sin conexión usa OCR local (Tesseract.js) en el teléfono con una alerta sutil de "revisa los datos". Lee fecha de emisión, NCF, RNC emisor, ITBIS y total en una tarjeta de confirmación editable; archiva por la fecha de emisión, registra en `_gastos.json` y detecta duplicados por NCF. Sobre las fases 1.5 (captura + auto-color + 4 modos + visor) y la Fase 1 (Google Drive). La maqueta de referencia sigue en `/prototipo/`.
+> Estado: **Fase 2C.2** — revisor con Gemini: las facturas subidas incompletas o leídas con OCR local quedan "Pendiente de revisión"; al abrir la app con conexión + API key, Gemini las re-lee y completa (una PWA no procesa con la app cerrada). Tocar una factura por revisar en Gastos abre un panel editable para confirmarla. Sobre la **Fase 2B** (importación en lote) y la 2A (OCR).
 >
 > Al desplegar cambios, sube la constante VERSION de sw.js para que los usuarios reciban la actualización.
 

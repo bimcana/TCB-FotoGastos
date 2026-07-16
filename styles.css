@@ -255,6 +255,16 @@ body{
 .proc-txt{color:#E9F1F8; font-size:14px; font-weight:600}
 @keyframes girar{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){ .spinner{animation:none} }
+/* Panel de revisión de una factura pendiente (overlay con campos editables). */
+.revisar-panel{position:absolute; inset:0; z-index:55; display:flex; align-items:flex-end; justify-content:center;
+  background:rgba(6,10,18,.55); padding:0}
+.revisar-panel[hidden]{display:none}
+.revisar-card{width:100%; max-height:86%; overflow-y:auto; background:var(--panel);
+  border:1px solid var(--line-soft); border-radius:18px 18px 0 0; padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+.revisar-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:12px}
+.revisar-head b{font-size:16px; color:var(--silver)}
+.revisar-x{width:34px; height:34px; border-radius:50%; border:1px solid var(--line); background:var(--glass);
+  color:var(--silver); font-size:16px; cursor:pointer; font-family:inherit}
 /* Barra de progreso de la importación en lote. */
 .lote-bar{background:var(--glass); border:1px solid var(--line-soft); border-radius:12px; padding:9px 12px; margin-bottom:10px}
 .lote-bar[hidden]{display:none}

@@ -153,6 +153,28 @@
     </section>
   </div>
 
+  <div class="revisar-panel" id="revisar-panel" hidden>
+    <div class="revisar-card">
+      <div class="revisar-head">
+        <b id="revisar-titulo">Revisar factura</b>
+        <button class="revisar-x" id="revisar-cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="campos">
+        <label class="campo campo-wide"><span>Fecha de emisión</span><input id="rv-fecha" type="text" inputmode="numeric" placeholder="AAAA-MM-DD"></label>
+        <label class="campo campo-wide"><span>NCF</span><input id="rv-ncf" type="text"></label>
+        <label class="campo"><span>RNC emisor</span><input id="rv-rnc" type="text" inputmode="numeric"></label>
+        <label class="campo"><span>Comercio</span><input id="rv-comercio" type="text"></label>
+        <label class="campo"><span>Subtotal</span><input id="rv-subtotal" type="text" inputmode="decimal"></label>
+        <label class="campo"><span>ITBIS</span><input id="rv-itbis" type="text" inputmode="decimal"></label>
+        <label class="campo campo-wide"><span>Total</span><input id="rv-total" type="text" inputmode="decimal"></label>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:12px">
+        <button class="btn btn-ghost btn-sm" id="rv-ver-imagen" style="flex:1">Ver imagen</button>
+        <button class="btn btn-primary btn-sm" id="rv-confirmar" style="flex:1">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
   <div class="visor" id="visor" hidden>
     <button class="visor-cerrar" id="visor-cerrar" aria-label="Cerrar pantalla completa">✕</button>
     <img id="visor-img" alt="Factura escaneada a pantalla completa">
