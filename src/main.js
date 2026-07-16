@@ -175,13 +175,11 @@ function leerCampos(){
 function okChip(txt){ return `<span class="chip ok"><span class="dot"></span>${txt}</span>`; }
 function warnChip(txt){ return `<span class="chip warn"><span class="dot"></span>${txt}</span>`; }
 
-// Deshabilita los campos Y el botón de confirmar mientras Gemini lee: evita que una edición
-// manual sea pisada por la respuesta tardía del OCR (los inputs deshabilitados no emiten
-// 'change'), y que se suba una factura con los datos aún en null / archivada por fecha de
-// respaldo en vez de la de emisión. Se reactiva al terminar la lectura vigente.
+// Deshabilita los campos mientras el motor lee (una respuesta tardia no debe pisar una
+// edicion manual). El boton Confirmar queda SIEMPRE habilitado: guardar durante la
+// lectura cancela la peticion y sube la factura como provisional (la IA la revisa luego).
 function setCamposHabilitados(hab){
   CAMPOS_IDS.forEach(id => { document.getElementById(id).disabled = !hab; });
-  document.getElementById('confirm-btn').disabled = !hab;
 }
 
 // Motor elegido para ESTA factura (se restablece a IA en cada captura). El toggle solo
@@ -582,7 +580,8 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
 });
 
 // Confirmar y subir + pantalla Gastos (Task 10)
-import { nombreCarpetaMes, siguienteNombre, hoyISO } from './naming.js';
+import { nombreCarpetaMes, siguienteNombre, hoyISO,
+         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo } from './naming.js';
 
 // Cola offline en IndexedDB con reintento al reconectar (Task 11)
 import { encolar, pendientes, eliminar, cuenta } from './queue.js';
@@ -605,20 +604,25 @@ function subirFactura(blob, datos){
   return conLockIndice(async () => {
     const raizId = get('carpetaRaizId');
     if (!conectado() || !raizId) throw new Error('sin-conexion');
-    const fechaISO = normalizarFecha(datos.fechaEmision) || hoyISO(); // respaldo: fecha del dispositivo
-    const mesId = await asegurarCarpeta(nombreCarpetaMes(fechaISO), raizId);
+    const fechaISO = normalizarFecha(datos.fechaEmision); // null → subida provisional
+    const carpetaMes = nombreCarpetaMes(fechaISO || hoyISO());
+    const mesId = await asegurarCarpeta(carpetaMes, raizId);
     const idx = await leerJSON(mesId, '_gastos.json');
     // Re-chequeo definitivo contra el índice actual (cubre reintentos de la cola offline,
     // donde el duplicado pudo registrarse después de que la factura se encoló).
     const dup = buscarDuplicado(idx, datos.ncf);
-    const nombre = siguienteNombre(fechaISO, await listarNombres(mesId));
-    await subirJPEG(blob, nombre, mesId);
-    // El índice registra la fecha REALMENTE usada para archivar (fechaISO), no el texto crudo:
-    // si el OCR dio una fecha no parseable y se usó el respaldo (hoy), el índice coincide con
-    // la carpeta donde quedó el archivo — trazabilidad fiscal correcta.
+    const nombres = await listarNombres(mesId);
+    // Sin fecha de emision el nombre es provisional; el revisor lo re-archiva al conocerla.
+    const nombre = fechaISO ? siguienteNombre(fechaISO, nombres)
+                            : nombreUnico(nombreProvisional(), nombres);
+    const subida = await subirJPEG(blob, nombre, mesId);
+    // El índice registra la fecha REALMENTE usada para archivar (fechaISO o ninguna), no el
+    // texto crudo: siempre coincide con la carpeta donde quedó el archivo — trazabilidad 606.
     const entrada = entradaDeFactura(nombre, { ...datos, fechaEmision: fechaISO }, datos.origen || 'manual', !!dup);
+    entrada.driveId = subida.id; // permite re-archivar sin buscar por nombre (idempotente)
+    if (!fechaISO){ entrada.estado = 'pendiente'; entrada.provisional = true; }
     await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada));
-    // Si quedó incompleta o la leyó el OCR local, se guarda para que Gemini la revise luego.
+    // Si quedó incompleta, provisional o leída por OCR local, Gemini la revisa luego.
     if (entrada.estado !== 'completa'){
       try { await encolarRevision({ blob, mesId, archivo: nombre }); } catch(e){ console.error(e); }
     }
@@ -629,6 +633,9 @@ function subirFactura(blob, datos){
 document.getElementById('confirm-btn').addEventListener('click', async () => {
   const res = window.__resultado;
   if (!res) return;
+  // Guardar durante la lectura: se cancela la peticion en vuelo y la factura sube como
+  // provisional (origen 'cargando'); la IA en background la lee y la re-archiva despues.
+  if (abortLectura){ abortLectura.abort(); abortLectura = null; setCamposHabilitados(true); }
   const canvas = res.canvasFinal || res.canvasOriginal;
   // Se congelan los datos ANTES del await de la subida: si el usuario edita los campos
   // mientras la factura sube, no queremos que un cambio a mitad de camino contamine
@@ -649,7 +656,9 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
     }
     colaEnProceso = true; lockAdquirido = true;
     const { nombre, duplicada } = await subirFactura(blob, datos);
-    toast(duplicada ? `Subida: ${nombre} — marcada como DUPLICADA (revísala en Gastos)` : `Subida: ${nombre} ✓`);
+    toast(duplicada ? `Subida: ${nombre} — marcada como DUPLICADA (revísala en Gastos)`
+        : esProvisional(nombre) ? 'Subida ✓ — la IA leerá los datos y la renombrará'
+        : `Subida: ${nombre} ✓`);
     avanzarLoteOIr('gastos');
   } catch(e){
     console.error(e);
