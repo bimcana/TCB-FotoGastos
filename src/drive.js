@@ -57,6 +57,16 @@ export async function buscarCarpeta(nombre, padreId = null){
   return res.files.length ? res.files[0].id : null;
 }
 
+export async function descargarImagen(carpetaId, nombre){
+  const q = encodeURIComponent(`name='${nombre.replace(/'/g, "\\'")}' and '${carpetaId}' in parents and trashed=false`);
+  const res = await api(`files?q=${q}&fields=files(id)&pageSize=1`);
+  if (!res.files.length) return null;
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${res.files[0].id}?alt=media`,
+    { headers: { Authorization: 'Bearer ' + accessToken } });
+  if (!r.ok) return null;
+  return r.blob();
+}
+
 export async function listarNombres(carpetaId){
   const q = encodeURIComponent(`'${carpetaId}' in parents and trashed=false`);
   const res = await api(`files?q=${q}&fields=files(name)&pageSize=1000`);

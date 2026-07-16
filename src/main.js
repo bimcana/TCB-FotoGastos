@@ -37,7 +37,8 @@ import { procesar, aplicarRealce, canvasAJpeg } from './process.js';
 import { get, set } from './settings.js';
 import { extraerDatos } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
-import { ncfValido, normalizarFecha, buscarDuplicado, montoValido } from './validacion.js';
+import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta } from './validacion.js';
+import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
 
 // Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
 // es síncrono, no hay await que ceda el hilo). Con doble rAF nos aseguramos de que el
@@ -571,7 +572,7 @@ modeloEl.addEventListener('click', (ev) => {
 });
 
 // Conexión a Google Drive (Task 9)
-import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON } from './drive.js';
+import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen } from './drive.js';
 
 document.getElementById('btn-conectar').addEventListener('click', async () => {
   const btn = document.getElementById('btn-conectar');
@@ -589,6 +590,7 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
     toast('Google Drive conectado');
     refrescarGastos();
     procesarCola();
+    revisarPendientes(); // re-lee con Gemini las facturas pendientes al conectar
   } catch(e){
     console.error(e);
     toast('No se pudo conectar: ' + e.message);
@@ -623,6 +625,10 @@ async function subirFactura(blob, datos){
   // la carpeta donde quedó el archivo — trazabilidad fiscal correcta.
   const entrada = entradaDeFactura(nombre, { ...datos, fechaEmision: fechaISO }, datos.origen || 'manual', !!dup);
   await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada));
+  // Si quedó incompleta o la leyó el OCR local, se guarda para que Gemini la revise luego.
+  if (entrada.estado !== 'completa'){
+    try { await encolarRevision({ blob, mesId, archivo: nombre }); } catch(e){ console.error(e); }
+  }
   return { nombre, duplicada: !!dup, duplicadaDe: dup ? dup.archivo : null };
 }
 
@@ -697,6 +703,43 @@ async function procesarCola(){
 window.addEventListener('online', procesarCola);
 actualizarBadge();
 
+// Revisor con Gemini: al abrir la app con conexión + API key, re-lee las facturas de la
+// cola de revisión (incompletas o de OCR local), rellena con Gemini y las deja "pendiente"
+// (a la espera de que el usuario confirme). Una PWA no corre esto con la app cerrada.
+let revisando = false;
+async function revisarPendientes(){
+  if (revisando || colaEnProceso || !conectado()) return;
+  const key = get('geminiKey', '');
+  if (!key) return;
+  const items = await pendientesRevision();
+  if (!items.length) return;
+  revisando = true;
+  try {
+    for (const item of items){
+      try {
+        const canvas = await archivoACanvas(item.blob);
+        const datos = await extraerDatos(canvas, key, geminiModelo);
+        const idx = await leerJSON(item.mesId, '_gastos.json');
+        const f = idx?.facturas?.find(x => x.archivo === item.archivo);
+        if (!f){ await eliminarRevision(item.id); continue; } // la entrada ya no existe
+        if (datos){ // rellenar con los valores no nulos de Gemini
+          for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'itbis', 'total']){
+            if (datos[c] != null && datos[c] !== '') f[c] = datos[c];
+          }
+        }
+        f.revisadaIA = true;
+        f.estado = facturaCompleta(f) ? 'pendiente' : 'incompleta'; // el usuario confirma después
+        await guardarJSON(item.mesId, '_gastos.json', idx);
+        await eliminarRevision(item.id);
+      } catch(e){ console.error(e); break; } // reintentar en la próxima apertura/conexión
+    }
+  } finally {
+    revisando = false;
+    if (document.getElementById('scr-gastos').classList.contains('active')) refrescarGastos();
+  }
+}
+window.addEventListener('online', revisarPendientes);
+
 async function refrescarGastos(){
   const raizId = get('carpetaRaizId');
   const carpetaMes = nombreCarpetaMes(hoyISO());
@@ -711,6 +754,7 @@ async function refrescarGastos(){
       leerJSON(mesId, '_gastos.json').catch(() => null)
     ]);
     const entradaPorArchivo = new Map((idx?.facturas || []).map(f => [f.archivo, f]));
+    window.__gastosMes = { mesId, idx }; // contexto para confirmar una factura pendiente
     const num = n => { const m = n.match(/^Compra_(\d+)/i); return m ? parseInt(m[1], 10) : -1; };
     nombres.sort((a, b) => num(b) - num(a));
     const nPend = (idx?.facturas || []).filter(f => f.estado === 'incompleta' || f.estado === 'pendiente').length;
@@ -748,6 +792,9 @@ async function refrescarGastos(){
           chip.style.cssText = 'margin-top:4px; font-size:10px; padding:2px 8px';
           chip.innerHTML = '<span class="dot"></span>' + est[1];
           amt.appendChild(chip);
+          // las facturas por revisar son tocables: abren el panel de confirmación
+          inv.style.cursor = 'pointer';
+          inv.addEventListener('click', () => abrirRevisar(e.archivo));
         }
         inv.appendChild(thumb); inv.appendChild(info);
         if (amt.childNodes.length) inv.appendChild(amt);
@@ -756,4 +803,60 @@ async function refrescarGastos(){
     }
   } catch(e){ console.error(e); }
 }
-document.getElementById('tab-gastos').addEventListener('click', refrescarGastos);
+document.getElementById('tab-gastos').addEventListener('click', () => { refrescarGastos(); revisarPendientes(); });
+
+// ---------- Confirmación de una factura pendiente (panel de revisión) ----------
+const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-itbis':'itbis','rv-total':'total' };
+let rvArchivo = null;
+
+function abrirRevisar(archivo){
+  const idx = window.__gastosMes?.idx;
+  const f = idx?.facturas?.find(x => x.archivo === archivo);
+  if (!f) return;
+  rvArchivo = archivo;
+  document.getElementById('revisar-titulo').textContent = `Revisar ${archivo}`;
+  for (const [id, campo] of Object.entries(RV_CAMPOS)){
+    document.getElementById(id).value = f[campo] != null ? f[campo] : '';
+  }
+  document.getElementById('revisar-panel').hidden = false;
+}
+function cerrarRevisar(){ document.getElementById('revisar-panel').hidden = true; rvArchivo = null; }
+
+async function confirmarRevision(){
+  const ctx = window.__gastosMes;
+  if (!ctx || !rvArchivo) return;
+  const f = ctx.idx?.facturas?.find(x => x.archivo === rvArchivo);
+  if (!f){ cerrarRevisar(); return; }
+  const num = v => { const n = parseFloat(String(v).trim().replace(',', '.')); return Number.isFinite(n) ? n : null; };
+  for (const [id, campo] of Object.entries(RV_CAMPOS)){
+    const v = document.getElementById(id).value.trim();
+    f[campo] = ['subtotal','itbis','total'].includes(campo) ? num(v) : (v || null);
+  }
+  f.estado = facturaCompleta(f) ? 'completa' : 'incompleta';
+  const btn = document.getElementById('rv-confirmar');
+  btn.disabled = true; btn.textContent = 'Guardando…';
+  try {
+    await guardarJSON(ctx.mesId, '_gastos.json', ctx.idx);
+    toast(f.estado === 'completa' ? 'Factura confirmada ✓' : 'Guardada — aún faltan datos');
+    cerrarRevisar();
+    refrescarGastos();
+  } catch(e){ console.error(e); toast('No se pudo guardar: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = 'Confirmar'; }
+}
+
+async function verImagenRevision(){
+  const ctx = window.__gastosMes;
+  if (!ctx || !rvArchivo) return;
+  toast('Cargando imagen…');
+  try {
+    const blob = await descargarImagen(ctx.mesId, rvArchivo);
+    if (!blob) return toast('No se encontró la imagen en Drive');
+    const visorImg = document.getElementById('visor-img');
+    visorImg.src = URL.createObjectURL(blob);
+    document.getElementById('visor').hidden = false;
+  } catch(e){ console.error(e); toast('No se pudo cargar la imagen'); }
+}
+
+document.getElementById('revisar-cerrar').addEventListener('click', cerrarRevisar);
+document.getElementById('rv-confirmar').addEventListener('click', confirmarRevision);
+document.getElementById('rv-ver-imagen').addEventListener('click', verImagenRevision);
