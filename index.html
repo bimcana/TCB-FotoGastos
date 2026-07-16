@@ -98,8 +98,12 @@
       <div class="scroll">
         <div class="card month-card">
           <div class="eyebrow">Mes actual</div>
-          <h3 style="margin-top:4px" class="num" id="mes-nombre">—</h3>
-          <div class="meta num" id="mes-meta">Conecta Google Drive en Ajustes</div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:4px">
+            <button class="mes-flecha" id="mes-prev" aria-label="Mes anterior">‹</button>
+            <h3 style="margin:0; flex:1; text-align:center" class="num" id="mes-nombre">—</h3>
+            <button class="mes-flecha" id="mes-next" aria-label="Mes siguiente">›</button>
+          </div>
+          <div class="meta num" id="mes-meta" style="text-align:center">Conecta Google Drive en Ajustes</div>
         </div>
         <div class="card"><div class="eyebrow" style="margin-bottom:6px">Facturas del mes</div>
           <div class="invoice-list" id="lista-mes"></div>

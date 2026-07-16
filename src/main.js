@@ -736,7 +736,7 @@ window.addEventListener('load', () => setTimeout(reconectarSilencioso, 600));
 
 // Confirmar y subir + pantalla Gastos (Task 10)
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
-         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo } from './naming.js';
+         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo, mesesDeCarpetas } from './naming.js';
 
 // Cola offline en IndexedDB con reintento al reconectar (Task 11)
 import { encolar, pendientes, eliminar, cuenta } from './queue.js';
@@ -1034,13 +1034,43 @@ async function revisarPendientes(){
 }
 window.addEventListener('online', revisarPendientes);
 
+// Selector de mes (Fase 3): Gastos opera sobre `mesVisto`; las flechas navegan entre
+// los meses con carpeta en Drive (el actual siempre esta). Ver un mes pasado NO crea
+// su carpeta: se usa buscarCarpeta, no asegurarCarpeta.
+let mesVisto = hoyISO().slice(0, 7);
+let mesesDisponibles = [mesVisto];
+
+function actualizarFlechasMes(){
+  const i = mesesDisponibles.indexOf(mesVisto);
+  document.getElementById('mes-prev').disabled = i <= 0;
+  document.getElementById('mes-next').disabled = i < 0 || i >= mesesDisponibles.length - 1;
+}
+document.getElementById('mes-prev').addEventListener('click', () => {
+  const i = mesesDisponibles.indexOf(mesVisto);
+  if (i > 0){ mesVisto = mesesDisponibles[i - 1]; refrescarGastos(); }
+});
+document.getElementById('mes-next').addEventListener('click', () => {
+  const i = mesesDisponibles.indexOf(mesVisto);
+  if (i >= 0 && i < mesesDisponibles.length - 1){ mesVisto = mesesDisponibles[i + 1]; refrescarGastos(); }
+});
+
 async function refrescarGastos(){
   const raizId = get('carpetaRaizId');
-  const carpetaMes = nombreCarpetaMes(hoyISO());
+  const carpetaMes = nombreCarpetaMes(mesVisto + '-01');
   document.getElementById('mes-nombre').textContent = carpetaMes;
   if (!conectado() || !raizId) return;
   try {
-    const mesId = await asegurarCarpeta(carpetaMes, raizId);
+    mesesDisponibles = mesesDeCarpetas(await listarNombres(raizId), hoyISO());
+    actualizarFlechasMes();
+    const esMesActual = mesVisto === hoyISO().slice(0, 7);
+    const mesId = esMesActual ? await asegurarCarpeta(carpetaMes, raizId)
+                              : await buscarCarpeta(carpetaMes, raizId);
+    if (!mesId){
+      document.getElementById('mes-meta').textContent = 'Este mes no tiene facturas.';
+      document.getElementById('lista-mes').innerHTML = '<div class="gem-note">Sin facturas registradas.</div>';
+      window.__gastosMes = null;
+      return;
+    }
     // El índice es opcional (mes recién creado o _gastos.json aún inexistente); si falla
     // la lectura, se sigue mostrando la lista sin el marcado de duplicadas.
     const [nombres, idx] = await Promise.all([
