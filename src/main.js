@@ -96,7 +96,7 @@ document.getElementById('shutter').addEventListener('click', async () => {
   const fx = document.getElementById('flashfx');
   fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
   // Sin deteccion en vivo: reintenta sobre el still (con rescate) y luego con la IA local.
-  let esquinas = ultimasEsquinas || detectarDocumento(canvas, 1200) || await detectarConIA(canvas);
+  let esquinas = ultimasEsquinas || detectarDocumento(canvas, 1200) || await detectarConIAConOverlay(canvas);
   window.__captura = { canvas, esquinas };
   procesarYRevisar();
 });
@@ -369,6 +369,14 @@ import { abrirEditorEsquinas, initEditorEsquinas } from './esquinas.js';
 import { detectarConIA } from './detectia.js';
 initEditorEsquinas();
 
+// La IA tarda 2-4 s por imagen: overlay visible para que no parezca colgado.
+async function detectarConIAConOverlay(canvas){
+  const ov = document.getElementById('overlay-proc');
+  ov.hidden = false;
+  try { return await detectarConIA(canvas); }
+  finally { ov.hidden = true; }
+}
+
 async function ajustarEsquinas(){
   const res = window.__resultado;
   if (!res) return;
@@ -415,7 +423,7 @@ async function cargarSiguienteDelLote(){
     // Autorecorte: clasico (rapido) → IA local si fallo. El editor abre SIEMPRE con lo
     // detectado precargado; "Aplicar" acepta el recorte y se pasa a los datos (Adobe Scan).
     let esquinas = detectarDocumento(canvas, 1200);
-    if (!esquinas) esquinas = await detectarConIA(canvas);
+    if (!esquinas) esquinas = await detectarConIAConOverlay(canvas);
     esquinas = await abrirEditorEsquinas(canvas, esquinas);
     window.__captura = { canvas, esquinas };
     procesarYRevisar();

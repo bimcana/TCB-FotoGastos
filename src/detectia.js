@@ -19,7 +19,9 @@ function sesion(){
   if (!sesionProm){
     sesionProm = (async () => {
       if (!window.ort) await cargarScript('vendor/ort/ort.wasm.min.js');
-      ort.env.wasm.wasmPaths = 'vendor/ort/';
+      // URL absoluta: el loader resuelve el .mjs del runtime con import() dinamico y un
+      // especificador relativo sin './' falla la resolucion de modulos.
+      ort.env.wasm.wasmPaths = new URL('vendor/ort/', location.href).href;
       ort.env.wasm.numThreads = 1; // GitHub Pages no envia COOP/COEP: sin hilos
       return ort.InferenceSession.create('vendor/modelos/u2netp.onnx',
         { executionProviders: ['wasm'] });
