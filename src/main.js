@@ -549,6 +549,26 @@ inpCarpeta.value = get('carpetaRaiz', 'Gastos_NCF');
 inpClient.addEventListener('change', () => set('clientId', inpClient.value.trim()));
 inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.value.trim() || 'Gastos_NCF'); set('carpetaRaizId', null); });
 
+// "Otros ajustes": credenciales avanzadas (API key + Client ID) plegadas tras un PIN de
+// 4 numeros, para que el usuario normal no las toque por accidente. Es un candado de
+// conveniencia, no seguridad fuerte: la app entera corre en el telefono del usuario.
+const otrosPanel = document.getElementById('otros-ajustes');
+document.getElementById('btn-otros').addEventListener('click', () => {
+  if (!otrosPanel.hidden){ otrosPanel.hidden = true; return; } // segundo toque: plegar
+  const pinGuardado = get('pinAjustes', null);
+  if (!pinGuardado){
+    const nuevo = (prompt('Crea un PIN de 4 números para proteger estos ajustes:') || '').trim();
+    if (!/^\d{4}$/.test(nuevo)) return toast('El PIN debe ser de 4 números');
+    set('pinAjustes', nuevo);
+    toast('PIN creado ✓ — guárdalo bien');
+    otrosPanel.hidden = false;
+    return;
+  }
+  const pin = (prompt('PIN de 4 números:') || '').trim();
+  if (pin !== pinGuardado) return toast('PIN incorrecto');
+  otrosPanel.hidden = false;
+});
+
 const inpGemini = document.getElementById('inp-gemini');
 inpGemini.value = get('geminiKey', '');
 inpGemini.addEventListener('change', () => set('geminiKey', inpGemini.value.trim()));
