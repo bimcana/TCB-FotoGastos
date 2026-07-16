@@ -1,6 +1,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ordenarEsquinas, esEstable, dimensionesDestino, cuadrilateroValido, areaCuadrilatero, boundingBox, escalaTrabajo } from '../src/detect.js';
+import { ordenarEsquinas, esEstable, dimensionesDestino, cuadrilateroValido, areaCuadrilatero, boundingBox, escalaTrabajo,
+         mapearEsquinas, tocaBorde } from '../src/detect.js';
+
+test('mapearEsquinas escala x/y de forma independiente', () => {
+  assert.deepEqual(mapearEsquinas([{x:10,y:20}], 2, 0.5), [{x:20,y:10}]);
+});
+
+test('tocaBorde detecta esquinas pegadas al borde del frame', () => {
+  const dentro = [{x:50,y:50},{x:950,y:50},{x:950,y:950},{x:50,y:950}];
+  assert.equal(tocaBorde(dentro, 1000, 1000), false);
+  assert.equal(tocaBorde([{x:5,y:500},...dentro.slice(1)], 1000, 1000), true);  // x en el 1%
+  assert.equal(tocaBorde([{x:50,y:996},...dentro.slice(1)], 1000, 1000), true); // y al fondo
+});
 
 test('escalaTrabajo limita el lado mayor a maxLado y nunca amplia', () => {
   assert.equal(escalaTrabajo(1920, 1080, 700), 700 / 1920);

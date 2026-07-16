@@ -380,7 +380,7 @@ const visorRecortar = document.getElementById('visor-recortar');
 visorRecortar.addEventListener('click', () => { cerrarVisor(); ajustarEsquinas(); });
 
 import { cvReady } from './cvready.js';
-import { detectarDocumento, esEstable, nitidezRegion } from './detect.js';
+import { detectarDocumento, esEstable, nitidezRegion, tocaBorde } from './detect.js';
 import { archivoACanvas } from './importar.js';
 
 // ---------- Importación en lote (Fase 2B) ----------
@@ -493,7 +493,10 @@ async function buclDeteccion(){
     if (video.videoWidth && document.getElementById('scr-camara').classList.contains('active') && !disparando){
       frame.width = video.videoWidth; frame.height = video.videoHeight;
       frame.getContext('2d').drawImage(video, 0, 0);
-      const esquinas = detectarDocumento(frame);
+      // En vivo: criterio estricto (sin rescate) y sin cuadrilateros pegados al borde,
+      // para no marcar "Documento detectado" sobre fondos texturados (falsos positivos).
+      let esquinas = detectarDocumento(frame, 700, { rescate: false });
+      if (esquinas && tocaBorde(esquinas, frame.width, frame.height)) esquinas = null;
       dibujarOverlay(esquinas);
       const shutter = document.getElementById('shutter');
 

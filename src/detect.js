@@ -45,6 +45,18 @@ export function escalaTrabajo(w, h, maxLado = 700){
   return Math.min(1, maxLado / Math.max(w, h));
 }
 
+export function mapearEsquinas(pts, sx, sy){
+  return pts.map(p => ({ x: p.x * sx, y: p.y * sy }));
+}
+
+// true si alguna esquina queda a menos de `margen` (fraccion) del borde del frame.
+// La camara en vivo lo usa para descartar falsos positivos (fondos texturados que
+// producen cuadrilateros pegados a los bordes del encuadre).
+export function tocaBorde(esquinas, w, h, margen = 0.01){
+  const mx = w * margen, my = h * margen;
+  return esquinas.some(p => p.x <= mx || p.y <= my || p.x >= w - mx || p.y >= h - my);
+}
+
 // Requieren OpenCV (solo navegador) ---------------------------------------
 
 // --- binarizaciones candidatas (cada una devuelve un Mat nuevo; el llamador lo libera) ---
@@ -80,12 +92,13 @@ function binCanny(gray){
 // mas vertices (bordes ondulados, esquinas redondeadas), su casco convexo con epsilon
 // creciente. La guarda de solidez evita dar por recibo una madeja de bordes fusionados
 // (p. ej. papel + brillo del fondo unidos por el dilate), cuyo casco seria basura.
-function aCuatroEsquinas(c, area){
+function aCuatroEsquinas(c, area, rescate = true){
   let approx = new cv.Mat();
   try {
     cv.approxPolyDP(c, approx, 0.02 * cv.arcLength(c, true), true);
     if (approx.rows === 4 && cv.isContourConvex(approx)) return leerPuntos(approx);
   } finally { approx.delete(); }
+  if (!rescate) return null; // camara en vivo: criterio estricto, sin casco convexo
   let hull;
   try {
     hull = new cv.Mat();
@@ -111,7 +124,7 @@ function leerPuntos(approx){
 }
 
 // Mayor cuadrilatero convexo del binario, en coords del canvas ORIGINAL (o null).
-function cuadrilateroDeBinaria(th, escala, minArea){
+function cuadrilateroDeBinaria(th, escala, minArea, rescate = true){
   let contours, hier;
   try {
     contours = new cv.MatVector();
@@ -124,7 +137,7 @@ function cuadrilateroDeBinaria(th, escala, minArea){
         c = contours.get(i);
         const area = cv.contourArea(c);
         if (area > mejorArea){
-          const pts = aCuatroEsquinas(c, area);
+          const pts = aCuatroEsquinas(c, area, rescate);
           if (pts){
             mejorArea = area;
             mejor = pts.map(p => ({ x: p.x / escala, y: p.y / escala }));
@@ -141,7 +154,8 @@ function cuadrilateroDeBinaria(th, escala, minArea){
   }
 }
 
-export function detectarDocumento(srcCanvas, maxLado = 700){
+export function detectarDocumento(srcCanvas, maxLado = 700, opciones = {}){
+  const { rescate = true } = opciones;
   const escala = escalaTrabajo(srcCanvas.width, srcCanvas.height, maxLado);
   const w = Math.round(srcCanvas.width * escala), h = Math.round(srcCanvas.height * escala);
   const small = document.createElement('canvas');
@@ -159,7 +173,7 @@ export function detectarDocumento(srcCanvas, maxLado = 700){
       let th;
       try {
         th = bin(gray);
-        const pts = cuadrilateroDeBinaria(th, escala, w * h * 0.12);
+        const pts = cuadrilateroDeBinaria(th, escala, w * h * 0.12, rescate);
         if (pts){
           const ordenado = ordenarEsquinas(pts);
           if (cuadrilateroValido(ordenado, srcCanvas.width, srcCanvas.height)) return ordenado;
@@ -168,6 +182,46 @@ export function detectarDocumento(srcCanvas, maxLado = 700){
     }
     return null;
   } finally {
+    if (gray) gray.delete();
+    if (mat) mat.delete();
+  }
+}
+
+// Mascara binaria (canvas) → 4 esquinas en coords de la imagen original. La usa el
+// motor IA (Fase 2E): la mascara de U2-Net-p es limpia, asi que el contorno mayor +
+// rescate bastan; se valida con la misma guarda que la deteccion clasica.
+export function esquinasDeMascara(maskCanvas, wOrig, hOrig){
+  let mat, gray, kernel, contours, hier;
+  try {
+    mat = cv.imread(maskCanvas);
+    gray = new cv.Mat();
+    cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
+    kernel = cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(9, 9));
+    cv.morphologyEx(gray, gray, cv.MORPH_CLOSE, kernel);
+    cv.threshold(gray, gray, 127, 255, cv.THRESH_BINARY);
+    contours = new cv.MatVector();
+    hier = new cv.Mat();
+    cv.findContours(gray, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    let mejor = null, mejorArea = maskCanvas.width * maskCanvas.height * 0.05;
+    for (let i = 0; i < contours.size(); i++){
+      let c;
+      try {
+        c = contours.get(i);
+        const area = cv.contourArea(c);
+        if (area > mejorArea){
+          const pts = aCuatroEsquinas(c, area);
+          if (pts){ mejorArea = area; mejor = pts; }
+        }
+      } finally { if (c) c.delete(); }
+    }
+    if (!mejor) return null;
+    const ordenado = ordenarEsquinas(
+      mapearEsquinas(mejor, wOrig / maskCanvas.width, hOrig / maskCanvas.height));
+    return cuadrilateroValido(ordenado, wOrig, hOrig) ? ordenado : null;
+  } finally {
+    if (kernel) kernel.delete();
+    if (hier) hier.delete();
+    if (contours) contours.delete();
     if (gray) gray.delete();
     if (mat) mat.delete();
   }
