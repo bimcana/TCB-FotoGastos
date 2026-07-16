@@ -552,7 +552,8 @@ modeloEl.addEventListener('click', (ev) => {
 });
 
 // Conexión a Google Drive (Task 9)
-import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen } from './drive.js';
+import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
+         buscarArchivo, moverYRenombrar, nombreDe } from './drive.js';
 
 document.getElementById('btn-conectar').addEventListener('click', async () => {
   const btn = document.getElementById('btn-conectar');
@@ -588,7 +589,7 @@ import { encolar, pendientes, eliminar, cuenta } from './queue.js';
 
 // Índice _gastos.json por mes (Task 5): archiva por fecha de EMISIÓN (con respaldo a
 // la fecha del dispositivo), registra metadatos y marca duplicados sin bloquear la subida.
-import { agregarEntrada, entradaDeFactura } from './indice.js';
+import { agregarEntrada, entradaDeFactura, quitarEntrada } from './indice.js';
 
 // Mutex que serializa TODAS las escrituras a _gastos.json (subida, revisor con Gemini y
 // confirmación del usuario): cada una hace su read-modify-write sin que otra la pise
@@ -627,6 +628,46 @@ function subirFactura(blob, datos){
       try { await encolarRevision({ blob, mesId, archivo: nombre }); } catch(e){ console.error(e); }
     }
     return { nombre, duplicada: !!dup, duplicadaDe: dup ? dup.archivo : null };
+  });
+}
+
+// Aplica `mutador(f)` a la entrada del indice y, si la fecha de emision ya no coincide
+// con la carpeta/nombre actual (o el nombre es provisional), renombra y mueve el archivo
+// en Drive y transfiere la entrada al indice del mes destino. Orden seguro: primero el
+// archivo, despues los indices; driveId hace la operacion re-ejecutable si algo falla a
+// mitad. Devuelve null si la entrada ya no existe.
+function actualizarEntradaConReArchivo(mesId, archivo, mutador){
+  return conLockIndice(async () => {
+    const idx = await leerJSON(mesId, '_gastos.json');
+    const f = idx?.facturas?.find(x => x.archivo === archivo);
+    if (!f) return null;
+    mutador(f);
+    const fechaISO = normalizarFecha(f.fechaEmision);
+    if (fechaISO) f.fechaEmision = fechaISO;
+    const carpetaActual = await nombreDe(mesId);
+    if (!fechaISO || !necesitaReArchivo(archivo, carpetaActual, fechaISO)){
+      await guardarJSON(mesId, '_gastos.json', idx);
+      return { nombreFinal: archivo, estado: f.estado, movidaA: null };
+    }
+    const carpetaDestino = nombreCarpetaMes(fechaISO);
+    const destinoId = carpetaDestino === carpetaActual ? mesId
+                    : await asegurarCarpeta(carpetaDestino, get('carpetaRaizId'));
+    const nombreFinal = siguienteNombre(fechaISO, await listarNombres(destinoId));
+    const fileId = f.driveId || await buscarArchivo(mesId, archivo);
+    if (!fileId) throw new Error('No se encontró ' + archivo + ' en Drive');
+    await moverYRenombrar(fileId, nombreFinal, destinoId, mesId);
+    // OJO: entrada NUEVA sin mutar `f`, para que quitarEntrada (nombre viejo) si la elimine.
+    const entradaFinal = { ...f, archivo: nombreFinal };
+    delete entradaFinal.provisional;
+    if (destinoId === mesId){
+      await guardarJSON(mesId, '_gastos.json', agregarEntrada(quitarEntrada(idx, archivo), entradaFinal));
+    } else {
+      const idxDest = await leerJSON(destinoId, '_gastos.json');
+      entradaFinal.duplicada = entradaFinal.duplicada || !!buscarDuplicado(idxDest, entradaFinal.ncf);
+      await guardarJSON(destinoId, '_gastos.json', agregarEntrada(idxDest, entradaFinal));
+      await guardarJSON(mesId, '_gastos.json', quitarEntrada(idx, archivo));
+    }
+    return { nombreFinal, estado: entradaFinal.estado, movidaA: destinoId === mesId ? null : carpetaDestino };
   });
 }
 
@@ -731,11 +772,9 @@ async function revisarPendientes(){
       try { datos = await extraerDatos(canvas, key, geminiModelo); }
       catch(e){ console.error(e); break; } // error de red/HTTP con Gemini: reintentar todo luego
       try {
-        // read-modify-write atómico contra el índice VIGENTE en Drive (no un snapshot viejo)
-        await conLockIndice(async () => {
-          const idx = await leerJSON(item.mesId, '_gastos.json');
-          const f = idx?.facturas?.find(x => x.archivo === item.archivo);
-          if (!f) return; // la entrada ya no existe
+        // read-modify-write atómico contra el índice VIGENTE en Drive; si Gemini fijó la
+        // fecha, el helper renombra/mueve el archivo (Pendiente_… → Compra_DDN en su mes).
+        await actualizarEntradaConReArchivo(item.mesId, item.archivo, f => {
           if (datos){
             for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'itbis', 'total']){
               if (datos[c] != null && datos[c] !== '') f[c] = datos[c];
@@ -743,7 +782,6 @@ async function revisarPendientes(){
           }
           f.revisadaIA = true;
           f.estado = facturaCompleta(f) ? 'pendiente' : 'incompleta'; // el usuario confirma después
-          await guardarJSON(item.mesId, '_gastos.json', idx);
         });
         await eliminarRevision(item.id);
       } catch(e){ console.error(e); break; } // fallo de Drive: reintentar en la próxima corrida
@@ -849,20 +887,17 @@ async function confirmarRevision(){
   }
   const btn = document.getElementById('rv-confirmar');
   btn.disabled = true; btn.textContent = 'Guardando…';
-  let estadoFinal = null;
   try {
-    // Read-modify-write atómico: re-lee el índice fresco de Drive y aplica SOLO esta entrada,
-    // para no pisar cambios que el revisor u otra subida hayan escrito mientras el panel estaba abierto.
-    await conLockIndice(async () => {
-      const idx = await leerJSON(ctx.mesId, '_gastos.json');
-      const f = idx?.facturas?.find(x => x.archivo === archivo);
-      if (!f) throw new Error('La factura ya no está en el índice');
+    // Read-modify-write atómico: re-lee el índice fresco de Drive y aplica SOLO esta entrada.
+    // Si el usuario cambió la fecha de emisión, el helper re-archiva (renombra/mueve) igual
+    // que el revisor en background.
+    const res = await actualizarEntradaConReArchivo(ctx.mesId, archivo, f => {
       Object.assign(f, edits);
       f.estado = facturaCompleta(f) ? 'completa' : 'incompleta';
-      estadoFinal = f.estado;
-      await guardarJSON(ctx.mesId, '_gastos.json', idx);
     });
-    toast(estadoFinal === 'completa' ? 'Factura confirmada ✓' : 'Guardada — aún faltan datos');
+    if (!res) throw new Error('La factura ya no está en el índice');
+    toast(res.movidaA ? `Guardada como ${res.nombreFinal} en ${res.movidaA} ✓`
+        : res.estado === 'completa' ? 'Factura confirmada ✓' : 'Guardada — aún faltan datos');
     cerrarRevisar();
     refrescarGastos();
   } catch(e){ console.error(e); toast('No se pudo guardar: ' + e.message); }
