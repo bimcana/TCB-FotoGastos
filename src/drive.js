@@ -57,6 +57,28 @@ export async function buscarCarpeta(nombre, padreId = null){
   return res.files.length ? res.files[0].id : null;
 }
 
+export async function buscarArchivo(carpetaId, nombre){
+  const q = encodeURIComponent(`name='${nombre.replace(/'/g, "\\'")}' and '${carpetaId}' in parents and trashed=false`);
+  const res = await api(`files?q=${q}&fields=files(id)&pageSize=1`);
+  return res.files.length ? res.files[0].id : null;
+}
+
+export async function nombreDe(fileId){
+  const r = await api(`files/${fileId}?fields=name`);
+  return r.name;
+}
+
+// Renombra y (si cambia el padre) mueve el archivo en UNA sola llamada PATCH.
+export async function moverYRenombrar(fileId, nuevoNombre, nuevoPadreId, viejoPadreId){
+  const params = (nuevoPadreId && viejoPadreId && nuevoPadreId !== viejoPadreId)
+    ? `?addParents=${nuevoPadreId}&removeParents=${viejoPadreId}` : '';
+  return api(`files/${fileId}${params}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: nuevoNombre })
+  });
+}
+
 export async function descargarImagen(carpetaId, nombre){
   const q = encodeURIComponent(`name='${nombre.replace(/'/g, "\\'")}' and '${carpetaId}' in parents and trashed=false`);
   const res = await api(`files?q=${q}&fields=files(id)&pageSize=1`);

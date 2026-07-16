@@ -66,11 +66,12 @@ function canvasABase64(canvas){
   return fuente.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
-export async function extraerDatos(canvas, apiKey, modelo = MODELO_DEFECTO){
+export async function extraerDatos(canvas, apiKey, modelo = MODELO_DEFECTO, signal = undefined){
   const b64 = canvasABase64(canvas);
   const r = await fetch(`${ENDPOINT(modelo)}?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cuerpoPeticion(b64))
+    body: JSON.stringify(cuerpoPeticion(b64)),
+    signal
   });
   if (!r.ok) throw new Error('Gemini ' + r.status + ': ' + await r.text());
   return parseRespuesta(await r.json());
