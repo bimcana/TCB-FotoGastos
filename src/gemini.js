@@ -73,6 +73,43 @@ export async function extraerDatos(canvas, apiKey, modelo = MODELO_DEFECTO, sign
     body: JSON.stringify(cuerpoPeticion(b64)),
     signal
   });
-  if (!r.ok) throw new Error('Gemini ' + r.status + ': ' + await r.text());
+  if (!r.ok){
+    const e = new Error('Gemini ' + r.status + ': ' + await r.text());
+    e.status = r.status; // para diagnosticoGemini en la UI
+    throw e;
+  }
   return parseRespuesta(await r.json());
+}
+
+// Mensaje claro por causa (o null si no es un problema de la key: red caida, error
+// transitorio del servicio). Cada codigo tiene un remedio distinto — no confundir al
+// usuario con "revisa la API key" cuando en realidad se agoto la cuota del nivel gratis.
+export function diagnosticoGemini(status){
+  if (status === 429) return 'Límite de uso de Gemini alcanzado (cuota del nivel gratis) — espera unos minutos o cambia de modelo en Ajustes';
+  if (status === 400 || status === 401) return 'API key de Gemini inválida — revísala en Ajustes';
+  if (status === 403) return 'API key restringida o bloqueada para este dominio — revisa sus restricciones en Google AI Studio';
+  if (status === 404) return 'El modelo elegido no está disponible para tu key — prueba otro modelo en Ajustes';
+  return null;
+}
+
+// Prueba la key (y el modelo elegido) contra el listado de modelos: barato y sin gastar
+// cuota de generacion. Devuelve { ok, mensaje }.
+export async function probarApiKey(apiKey, modelo = MODELO_DEFECTO){
+  let r;
+  try {
+    r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}&pageSize=1000`);
+  } catch(e){
+    return { ok: false, mensaje: 'Sin conexión — no se pudo probar la key' };
+  }
+  if (!r.ok) return { ok: false, mensaje: diagnosticoGemini(r.status) || ('Error ' + r.status + ' al validar la key') };
+  try {
+    const j = await r.json();
+    const nombres = (j.models || []).map(m => (m.name || '').replace(/^models\//, ''));
+    if (!nombres.includes(modelo)){
+      return { ok: false, mensaje: `Key válida ✓ pero el modelo «${modelo}» no aparece disponible — elige otro modelo` };
+    }
+    return { ok: true, mensaje: `Key válida ✓ — modelo «${modelo}» disponible` };
+  } catch(e){
+    return { ok: true, mensaje: 'Key válida ✓' };
+  }
 }

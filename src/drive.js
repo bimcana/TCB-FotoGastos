@@ -1,5 +1,21 @@
 let tokenClient = null, accessToken = null, expiraEn = 0;
 
+// El token de acceso vive ~1 h: se persiste para que reabrir la app dentro de esa
+// ventana NO requiera reconectar (la causa principal del "Drive se desconecta").
+// En 401 (vencido/revocado) se limpia y la UI ofrece reconectar.
+try {
+  const t = JSON.parse(localStorage.getItem('tcb:driveToken') || 'null');
+  if (t && t.accessToken && Date.now() < t.expiraEn){ accessToken = t.accessToken; expiraEn = t.expiraEn; }
+} catch(e){}
+
+function guardarToken(){
+  try { localStorage.setItem('tcb:driveToken', JSON.stringify({ accessToken, expiraEn })); } catch(e){}
+}
+function limpiarToken(){
+  accessToken = null; expiraEn = 0;
+  try { localStorage.removeItem('tcb:driveToken'); } catch(e){}
+}
+
 export function initAuth(clientId){
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: clientId,
@@ -26,6 +42,7 @@ export function conectar(opciones = {}){
       if (t.error) return rej(new Error(t.error));
       accessToken = t.access_token;
       expiraEn = Date.now() + (t.expires_in - 60) * 1000;
+      guardarToken();
       res();
     };
     tokenClient.requestAccessToken({ prompt: silencioso ? '' : 'consent' });
@@ -38,7 +55,7 @@ async function api(path, opts = {}){
     headers: { Authorization: 'Bearer ' + accessToken, ...(opts.headers || {}) }
   });
   if (r.status === 401){ // token vencido a mitad de sesion: avisar para reconectar
-    accessToken = null;
+    limpiarToken();
     if (onDesconexion) onDesconexion();
   }
   if (!r.ok) throw new Error('Drive ' + r.status + ': ' + await r.text());

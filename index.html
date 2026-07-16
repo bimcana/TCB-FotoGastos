@@ -129,7 +129,7 @@
         </div>
         <div class="card">
           <div class="eyebrow" style="margin-bottom:4px">Google Drive</div>
-          <label class="eyebrow" for="inp-clientid" style="display:block; margin-top:8px">Client ID de Google</label>
+          <label class="eyebrow" for="inp-clientid" style="display:block; margin-top:8px">Client ID de Google (opcional si la app trae credenciales)</label>
           <input class="keyfield" id="inp-clientid" placeholder="xxxxxxx.apps.googleusercontent.com">
           <label class="eyebrow" for="inp-carpeta" style="display:block; margin-top:10px">Nombre de la carpeta raíz</label>
           <input class="keyfield" id="inp-carpeta" placeholder="Gastos_NCF">
@@ -140,6 +140,8 @@
           <div class="eyebrow" style="margin-bottom:4px">Gemini — lectura de datos (OCR)</div>
           <label class="eyebrow" for="inp-gemini" style="display:block; margin-top:8px">API key de Google AI Studio</label>
           <input class="keyfield" id="inp-gemini" placeholder="AIza…">
+          <button class="btn btn-ghost btn-sm" id="btn-probar-gemini" style="margin-top:8px; width:100%">Probar la API key</button>
+          <div class="gem-note" id="gemini-estado" style="margin-top:6px" hidden></div>
           <label class="eyebrow" style="display:block; margin-top:10px">Modelo</label>
           <div class="filtros" id="modelo-gemini">
             <button class="filtro on" data-modelo="gemini-3.5-flash">3.5 Flash</button>

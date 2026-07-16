@@ -35,7 +35,7 @@ window.toast = toast;
 import { iniciarCamara, capturarFrame } from './camera.js';
 import { procesar, aplicarRealce, canvasAJpeg } from './process.js';
 import { get, set } from './settings.js';
-import { extraerDatos } from './gemini.js';
+import { extraerDatos, diagnosticoGemini, probarApiKey } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
 import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta } from './validacion.js';
 import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
@@ -87,6 +87,8 @@ document.addEventListener('visibilitychange', () => {
       console.error(err);
     });
   }
+  // iOS reanuda la PWA sin recargar: si el token caduco en background, renovarlo aqui.
+  if (!conectado()) reconectarSilencioso();
 });
 
 document.getElementById('shutter').addEventListener('click', async () => {
@@ -237,9 +239,10 @@ async function leerDatosDeFactura(){
         // Cancelada (toggle a OCR, guardado o re-proceso): la nueva accion controla la UI.
         if (e.name === 'AbortError') return;
         console.error(e);
-        // Si el error es de credenciales/cuota (no de red), avisar que revise la API key
-        // en vez de degradar en silencio; igual se cae a OCR local para no bloquear.
-        if (/\b(400|401|403|429)\b/.test(e.message || '')) toast('Problema con la API key de Gemini — revísala en Ajustes');
+        // Mensaje honesto por causa (cuota / key inválida / restringida / modelo); los
+        // errores de red o del servicio degradan al OCR local sin culpar a la key.
+        const diag = diagnosticoGemini(e.status);
+        if (diag) toast(diag);
         origen.textContent = 'Leyendo (OCR local)…';
         datos = await extraerDatosLocal(canvas); motor = 'local';
       } finally { abortLectura = null; }
@@ -550,6 +553,23 @@ const inpGemini = document.getElementById('inp-gemini');
 inpGemini.value = get('geminiKey', '');
 inpGemini.addEventListener('change', () => set('geminiKey', inpGemini.value.trim()));
 
+// Prueba la key contra el listado de modelos (barato, sin gastar cuota) y dice EXACTAMENTE
+// que pasa: valida, invalida, restringida, o cuota agotada — para no adivinar en campo.
+document.getElementById('btn-probar-gemini').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-probar-gemini');
+  const nota = document.getElementById('gemini-estado');
+  const key = get('geminiKey', '') || inpGemini.value.trim();
+  if (!key){ nota.hidden = false; nota.textContent = 'Pega primero tu API key.'; return; }
+  btn.disabled = true; btn.textContent = 'Probando…';
+  try {
+    const res = await probarApiKey(key, geminiModelo);
+    nota.hidden = false;
+    nota.textContent = res.mensaje;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Probar la API key';
+  }
+});
+
 // Selector de modelo de Gemini
 const modeloEl = document.getElementById('modelo-gemini');
 function actualizarUIModelo(){
@@ -568,6 +588,13 @@ modeloEl.addEventListener('click', (ev) => {
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
          buscarArchivo, moverYRenombrar, nombreDe, alDesconectar } from './drive.js';
 
+import { CLIENT_ID_APP } from './config.js';
+
+// Client ID efectivo: el de Ajustes (si el usuario puso uno) o el integrado en la app.
+function clientIdActivo(){
+  return get('clientId', '') || CLIENT_ID_APP;
+}
+
 // Pasos comunes tras conectar (boton de Ajustes, aviso tocable o reconexion silenciosa).
 async function postConexion(){
   const raizId = await asegurarCarpeta(get('carpetaRaiz', 'Gastos_NCF'));
@@ -585,7 +612,7 @@ async function postConexion(){
 
 document.getElementById('btn-conectar').addEventListener('click', async () => {
   const btn = document.getElementById('btn-conectar');
-  const clientId = get('clientId', '');
+  const clientId = clientIdActivo();
   if (!clientId) return toast('Pega primero tu Client ID de Google');
   btn.disabled = true;
   try {
@@ -611,7 +638,7 @@ alDesconectar(mostrarAvisoReconectar);
 // El subtitulo de Gastos es tocable cuando hay que reconectar (sin pasar por Ajustes).
 document.getElementById('gastos-sub').addEventListener('click', async () => {
   if (conectado()) return;
-  const clientId = get('clientId', '');
+  const clientId = clientIdActivo();
   if (!clientId) return toast('Pega tu Client ID de Google en Ajustes');
   try {
     initAuth(clientId);
@@ -625,8 +652,14 @@ document.getElementById('gastos-sub').addEventListener('click', async () => {
 // Google lo permite con prompt:'' mientras la sesion siga viva; si exige interaccion
 // (o el popup se bloquea), queda el aviso tocable en Gastos.
 async function reconectarSilencioso(){
-  const clientId = get('clientId', '');
-  if (!clientId || !get('driveConectadoAntes', false) || conectado()) return;
+  const clientId = clientIdActivo();
+  if (!clientId || !get('driveConectadoAntes', false)) return;
+  if (conectado()){
+    // Token restaurado de localStorage (vive ~1 h): sin popup ni permiso, directo a trabajar.
+    try { if (window.google) initAuth(clientId); } catch(e){ console.warn(e); }
+    try { await postConexion(); } catch(e){ console.warn(e); mostrarAvisoReconectar(); }
+    return;
+  }
   if (!window.google){ mostrarAvisoReconectar(); return; } // GIS aun no cargo
   try {
     initAuth(clientId);
@@ -1136,7 +1169,11 @@ async function leerConIAAhora(){
     let datos = null, motor = null;
     if (key){
       try { datos = await extraerDatos(canvas, key, geminiModelo); motor = 'gemini'; }
-      catch(e){ console.error(e); }
+      catch(e){
+        console.error(e);
+        const diag = diagnosticoGemini(e.status);
+        if (diag) toast(diag);
+      }
     }
     if (!datos){
       try { datos = await extraerDatosLocal(canvas); motor = 'local'; }

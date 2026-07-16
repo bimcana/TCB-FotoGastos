@@ -1,6 +1,16 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cuerpoPeticion, parseRespuesta } from '../src/gemini.js';
+import { cuerpoPeticion, parseRespuesta, diagnosticoGemini } from '../src/gemini.js';
+
+test('diagnosticoGemini distingue las causas por codigo HTTP', () => {
+  assert.match(diagnosticoGemini(429), /cuota|límite/i);
+  assert.match(diagnosticoGemini(400), /inválida/i);
+  assert.match(diagnosticoGemini(401), /inválida/i);
+  assert.match(diagnosticoGemini(403), /restringida|bloqueada/i);
+  assert.match(diagnosticoGemini(404), /modelo/i);
+  assert.equal(diagnosticoGemini(503), null); // error transitorio del servicio: sin toast de key
+  assert.equal(diagnosticoGemini(0), null);   // fallo de red: sin toast de key
+});
 
 test('cuerpoPeticion incluye la imagen y responseSchema', () => {
   const b = cuerpoPeticion('AAAA');
