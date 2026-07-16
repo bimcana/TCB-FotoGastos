@@ -803,7 +803,7 @@ async function refrescarGastos(){
     // El índice es opcional (mes recién creado o _gastos.json aún inexistente); si falla
     // la lectura, se sigue mostrando la lista sin el marcado de duplicadas.
     const [nombres, idx] = await Promise.all([
-      listarNombres(mesId).then(ns => ns.filter(n => /^Compra_/i.test(n))),
+      listarNombres(mesId).then(ns => ns.filter(n => /^(Compra|Pendiente)_/i.test(n))),
       leerJSON(mesId, '_gastos.json').catch(() => null)
     ]);
     const entradaPorArchivo = new Map((idx?.facturas || []).map(f => [f.archivo, f]));
@@ -845,7 +845,8 @@ async function refrescarGastos(){
           chip.style.cssText = 'margin-top:4px; font-size:10px; padding:2px 8px';
           chip.innerHTML = '<span class="dot"></span>' + est[1];
           amt.appendChild(chip);
-          // las facturas por revisar son tocables: abren el panel de confirmación
+        }
+        if (e){ // toda factura con entrada en el indice se puede abrir y editar
           inv.style.cursor = 'pointer';
           inv.addEventListener('click', () => abrirRevisar(e.archivo));
         }
@@ -862,6 +863,34 @@ document.getElementById('tab-gastos').addEventListener('click', () => { refresca
 const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-itbis':'itbis','rv-total':'total' };
 let rvArchivo = null;
 
+// Miniaturas del panel de revision: cache por sesion para no re-descargar de Drive.
+const thumbCache = new Map(); // archivo → Blob
+let rvThumbURL = null;
+
+async function cargarMiniatura(mesId, archivo){
+  const img = document.getElementById('rv-thumb');
+  img.hidden = true;
+  if (rvThumbURL){ URL.revokeObjectURL(rvThumbURL); rvThumbURL = null; }
+  try {
+    let blob = thumbCache.get(archivo);
+    if (!blob){
+      blob = await descargarImagen(mesId, archivo);
+      if (blob) thumbCache.set(archivo, blob);
+    }
+    if (!blob || rvArchivo !== archivo) return; // panel cerrado o cambiado mientras bajaba
+    rvThumbURL = URL.createObjectURL(blob);
+    img.src = rvThumbURL;
+    img.hidden = false;
+  } catch(e){ console.error(e); }
+}
+document.getElementById('rv-thumb').addEventListener('click', () => {
+  const blob = thumbCache.get(rvArchivo);
+  if (!blob) return;
+  document.getElementById('visor-recortar').hidden = true; // imagen de Drive: sin recorte
+  document.getElementById('visor-img').src = URL.createObjectURL(blob);
+  document.getElementById('visor').hidden = false;
+});
+
 function abrirRevisar(archivo){
   const idx = window.__gastosMes?.idx;
   const f = idx?.facturas?.find(x => x.archivo === archivo);
@@ -872,8 +901,14 @@ function abrirRevisar(archivo){
     document.getElementById(id).value = f[campo] != null ? f[campo] : '';
   }
   document.getElementById('revisar-panel').hidden = false;
+  cargarMiniatura(window.__gastosMes.mesId, archivo);
 }
-function cerrarRevisar(){ document.getElementById('revisar-panel').hidden = true; rvArchivo = null; }
+function cerrarRevisar(){
+  document.getElementById('revisar-panel').hidden = true;
+  rvArchivo = null;
+  if (rvThumbURL){ URL.revokeObjectURL(rvThumbURL); rvThumbURL = null; }
+  document.getElementById('rv-thumb').hidden = true;
+}
 
 async function confirmarRevision(){
   const ctx = window.__gastosMes;
@@ -909,7 +944,11 @@ async function verImagenRevision(){
   if (!ctx || !rvArchivo) return;
   toast('Cargando imagen…');
   try {
-    const blob = await descargarImagen(ctx.mesId, rvArchivo);
+    let blob = thumbCache.get(rvArchivo);
+    if (!blob){
+      blob = await descargarImagen(ctx.mesId, rvArchivo);
+      if (blob) thumbCache.set(rvArchivo, blob);
+    }
     if (!blob) return toast('No se encontró la imagen en Drive');
     const visorImg = document.getElementById('visor-img');
     visorImg.src = URL.createObjectURL(blob);
