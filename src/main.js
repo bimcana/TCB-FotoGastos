@@ -549,6 +549,40 @@ inpCarpeta.value = get('carpetaRaiz', 'Gastos_NCF');
 inpClient.addEventListener('change', () => set('clientId', inpClient.value.trim()));
 inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.value.trim() || 'Gastos_NCF'); set('carpetaRaizId', null); });
 
+// Perfil de empresa (membrete del documento de gastos) — Fase 3.
+import { empresaGuardada, guardarEmpresaLocal, empresaCompleta, archivoALogoB64 } from './empresa.js';
+
+const EMP_CAMPOS = { 'emp-razon':'razon', 'emp-rnc':'rnc', 'emp-ubicacion':'ubicacion', 'emp-tel':'tel', 'emp-correo':'correo' };
+
+function pintarEmpresa(){
+  const e = empresaGuardada();
+  for (const [id, campo] of Object.entries(EMP_CAMPOS)) document.getElementById(id).value = e[campo] || '';
+  const prev = document.getElementById('emp-logo-prev');
+  prev.hidden = !e.logoB64;
+  if (e.logoB64) prev.src = e.logoB64;
+}
+pintarEmpresa();
+
+async function guardarEmpresa(cambios){
+  const e = { ...empresaGuardada(), ...cambios };
+  guardarEmpresaLocal(e);
+  pintarEmpresa();
+  // Replica el membrete a la nube para que otras instalaciones lo hereden.
+  if (conectado() && get('carpetaRaizId')){
+    try { await guardarJSON(get('carpetaRaizId'), '_empresa.json', e); } catch(err){ console.error(err); }
+  }
+}
+for (const [id, campo] of Object.entries(EMP_CAMPOS)){
+  document.getElementById(id).addEventListener('change', ev => guardarEmpresa({ [campo]: ev.target.value.trim() }));
+}
+document.getElementById('emp-logo-btn').addEventListener('click', () => document.getElementById('emp-logo-file').click());
+document.getElementById('emp-logo-file').addEventListener('change', async ev => {
+  const f = ev.target.files[0]; ev.target.value = '';
+  if (!f) return;
+  try { await guardarEmpresa({ logoB64: await archivoALogoB64(f) }); toast('Logo guardado ✓'); }
+  catch(e){ console.error(e); toast('No se pudo leer el logo'); }
+});
+
 // "Otros ajustes": credenciales avanzadas (API key + Client ID) plegadas tras un PIN de
 // 4 numeros, para que el usuario normal no las toque por accidente. Es un candado de
 // conveniencia, no seguridad fuerte: la app entera corre en el telefono del usuario.
@@ -606,7 +640,9 @@ modeloEl.addEventListener('click', (ev) => {
 
 // Conexión a Google Drive (Task 9)
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
-         buscarArchivo, moverYRenombrar, nombreDe, alDesconectar } from './drive.js';
+         buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar } from './drive.js';
+import { paginar, generarPDF } from './pdfgastos.js';
+import { filas606, generarXLSX606 } from './f606.js';
 
 import { CLIENT_ID_APP } from './config.js';
 
@@ -620,6 +656,13 @@ async function postConexion(){
   const raizId = await asegurarCarpeta(get('carpetaRaiz', 'Gastos_NCF'));
   set('carpetaRaizId', raizId);
   set('driveConectadoAntes', true); // habilita la reconexion silenciosa al abrir
+  // Hereda el membrete guardado en la nube si esta instalacion no lo tiene aun.
+  if (!empresaCompleta(empresaGuardada())){
+    try {
+      const e = await leerJSON(raizId, '_empresa.json');
+      if (e){ guardarEmpresaLocal(e); pintarEmpresa(); }
+    } catch(err){ console.error(err); }
+  }
   document.getElementById('drive-estado').textContent =
     `Conectado ✓ — carpeta «${get('carpetaRaiz', 'Gastos_NCF')}» lista`;
   const sub = document.getElementById('gastos-sub');
@@ -695,7 +738,7 @@ window.addEventListener('load', () => setTimeout(reconectarSilencioso, 600));
 
 // Confirmar y subir + pantalla Gastos (Task 10)
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
-         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo } from './naming.js';
+         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo, mesesDeCarpetas } from './naming.js';
 
 // Cola offline en IndexedDB con reintento al reconectar (Task 11)
 import { encolar, pendientes, eliminar, cuenta } from './queue.js';
@@ -993,13 +1036,43 @@ async function revisarPendientes(){
 }
 window.addEventListener('online', revisarPendientes);
 
+// Selector de mes (Fase 3): Gastos opera sobre `mesVisto`; las flechas navegan entre
+// los meses con carpeta en Drive (el actual siempre esta). Ver un mes pasado NO crea
+// su carpeta: se usa buscarCarpeta, no asegurarCarpeta.
+let mesVisto = hoyISO().slice(0, 7);
+let mesesDisponibles = [mesVisto];
+
+function actualizarFlechasMes(){
+  const i = mesesDisponibles.indexOf(mesVisto);
+  document.getElementById('mes-prev').disabled = i <= 0;
+  document.getElementById('mes-next').disabled = i < 0 || i >= mesesDisponibles.length - 1;
+}
+document.getElementById('mes-prev').addEventListener('click', () => {
+  const i = mesesDisponibles.indexOf(mesVisto);
+  if (i > 0){ mesVisto = mesesDisponibles[i - 1]; refrescarGastos(); }
+});
+document.getElementById('mes-next').addEventListener('click', () => {
+  const i = mesesDisponibles.indexOf(mesVisto);
+  if (i >= 0 && i < mesesDisponibles.length - 1){ mesVisto = mesesDisponibles[i + 1]; refrescarGastos(); }
+});
+
 async function refrescarGastos(){
   const raizId = get('carpetaRaizId');
-  const carpetaMes = nombreCarpetaMes(hoyISO());
+  const carpetaMes = nombreCarpetaMes(mesVisto + '-01');
   document.getElementById('mes-nombre').textContent = carpetaMes;
   if (!conectado() || !raizId) return;
   try {
-    const mesId = await asegurarCarpeta(carpetaMes, raizId);
+    mesesDisponibles = mesesDeCarpetas(await listarNombres(raizId), hoyISO());
+    actualizarFlechasMes();
+    const esMesActual = mesVisto === hoyISO().slice(0, 7);
+    const mesId = esMesActual ? await asegurarCarpeta(carpetaMes, raizId)
+                              : await buscarCarpeta(carpetaMes, raizId);
+    if (!mesId){
+      document.getElementById('mes-meta').textContent = 'Este mes no tiene facturas.';
+      document.getElementById('lista-mes').innerHTML = '<div class="gem-note">Sin facturas registradas.</div>';
+      window.__gastosMes = null;
+      return;
+    }
     // El índice es opcional (mes recién creado o _gastos.json aún inexistente); si falla
     // la lectura, se sigue mostrando la lista sin el marcado de duplicadas.
     const [nombres, idx] = await Promise.all([
@@ -1064,6 +1137,74 @@ async function refrescarGastos(){
   } catch(e){ console.error(e); }
 }
 document.getElementById('tab-gastos').addEventListener('click', () => { refrescarGastos(); revisarPendientes(); });
+
+// ---------- Generar documento de Gastos (Fase 3) ----------
+// Ticket largo → 2 columnas con los recortes de la plantilla (sup 0–48%, inf 50–100%).
+async function prepararImagen(blob){
+  const canvas = await archivoACanvas(blob);
+  const ratio = canvas.height / canvas.width;
+  if (ratio <= 3) return { ratio, partes: [blob] }; // JPEG original tal cual
+  const partes = [];
+  for (const [t, b] of [[0, 0.48], [0.5, 1]]){
+    const c = document.createElement('canvas');
+    c.width = canvas.width; c.height = Math.round(canvas.height * (b - t));
+    c.getContext('2d').drawImage(canvas, 0, Math.round(canvas.height * t), canvas.width, c.height, 0, 0, canvas.width, c.height);
+    partes.push(await canvasAJpeg(c));
+  }
+  return { ratio, partes };
+}
+
+async function generarDocumento(){
+  const ctx = window.__gastosMes;
+  if (!conectado() || !ctx || !ctx.mesId) return toast('Conecta Google Drive para generar');
+  const emp = empresaGuardada();
+  if (!empresaCompleta(emp)){ toast('Configura la Empresa en Ajustes (razón social y RNC)'); show('ajustes'); return; }
+  const idx = await leerJSON(ctx.mesId, '_gastos.json').catch(() => null);
+  const todas = idx?.facturas || [];
+  if (!todas.length) return toast('Este mes no tiene facturas registradas');
+  const completas = todas.filter(f => f.estado === 'completa' && !f.duplicada);
+  const sinValidar = todas.filter(f => f.estado !== 'completa').length;
+  if (!completas.length) return toast('No hay facturas completas — valida las pendientes primero');
+  if (sinValidar && !confirm(`Hay ${sinValidar} factura(s) sin validar. ¿Generar solo con las ${completas.length} completas?`)) return;
+  const carpetaMes = nombreCarpetaMes(mesVisto + '-01');                    // '2025-06_Junio'
+  const mesTexto = `${carpetaMes.split('_')[1]} ${mesVisto.slice(0, 4)}`;   // 'Junio 2025'
+  const btn = document.getElementById('btn-generar');
+  const bar = document.getElementById('lote-bar'), txtBar = document.getElementById('lote-txt');
+  btn.disabled = true; bar.hidden = false; document.getElementById('lote-dots').innerHTML = '';
+  try {
+    const items = [];
+    for (let i = 0; i < completas.length; i++){
+      const f = completas[i];
+      txtBar.textContent = `Generando — descargando ${i + 1} de ${completas.length}…`;
+      const blob = thumbCache.get(f.archivo) || await descargarImagen(ctx.mesId, f.archivo);
+      if (!blob){ toast(`No se pudo leer ${f.archivo}; el PDF sale sin ella`); continue; }
+      thumbCache.set(f.archivo, blob);
+      const prep = await prepararImagen(blob);
+      items.push({ archivo: f.archivo, total: f.total, ratio: prep.ratio,
+                   partes: await Promise.all(prep.partes.map(async b => new Uint8Array(await b.arrayBuffer()))) });
+    }
+    if (!items.length) throw new Error('no se pudo leer ninguna imagen');
+    txtBar.textContent = 'Generando — armando el PDF…';
+    const pdfBlob = await generarPDF(paginar(items), emp, mesTexto);
+    txtBar.textContent = 'Generando — armando el Excel 606…';
+    const xlsxBlob = await generarXLSX606(filas606(todas, mesVisto), emp, mesVisto, mesTexto);
+    txtBar.textContent = 'Generando — subiendo a Drive…';
+    const nombrePDF = `Gastos_${mesTexto.replace(' ', '_')}.pdf`;
+    const nombreXLSX = `606_${mesTexto.replace(' ', '_')}.xlsx`;
+    await subirOReemplazar(pdfBlob, nombrePDF, ctx.mesId);
+    await subirOReemplazar(xlsxBlob, nombreXLSX, ctx.mesId);
+    const archivos = [
+      new File([pdfBlob], nombrePDF, { type: 'application/pdf' }),
+      new File([xlsxBlob], nombreXLSX, { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    ];
+    if (navigator.canShare && navigator.canShare({ files: archivos })){
+      try { await navigator.share({ files: archivos, title: `Gastos ${mesTexto}` }); } catch(e){ /* usuario cancelo */ }
+    }
+    toast(`Documento de ${mesTexto} generado y guardado en Drive ✓`);
+  } catch(e){ console.error(e); toast('No se pudo generar: ' + e.message); }
+  finally { btn.disabled = false; bar.hidden = true; actualizarBarraLote(); }
+}
+document.getElementById('btn-generar').addEventListener('click', generarDocumento);
 
 // ---------- Confirmación de una factura pendiente (panel de revisión) ----------
 const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-itbis':'itbis','rv-total':'total' };

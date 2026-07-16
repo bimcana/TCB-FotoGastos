@@ -1,3 +1,5 @@
 vendor/tesseract/** binary
 vendor/ort/** binary
 vendor/modelos/** binary
+vendor/pdf-lib/** binary
+vendor/sheetjs/** binary

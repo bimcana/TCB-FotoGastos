@@ -98,11 +98,16 @@
       <div class="scroll">
         <div class="card month-card">
           <div class="eyebrow">Mes actual</div>
-          <h3 style="margin-top:4px" class="num" id="mes-nombre">—</h3>
-          <div class="meta num" id="mes-meta">Conecta Google Drive en Ajustes</div>
+          <div style="display:flex; align-items:center; gap:8px; margin-top:4px">
+            <button class="mes-flecha" id="mes-prev" aria-label="Mes anterior">‹</button>
+            <h3 style="margin:0; flex:1; text-align:center" class="num" id="mes-nombre">—</h3>
+            <button class="mes-flecha" id="mes-next" aria-label="Mes siguiente">›</button>
+          </div>
+          <div class="meta num" id="mes-meta" style="text-align:center">Conecta Google Drive en Ajustes</div>
         </div>
         <div class="card"><div class="eyebrow" style="margin-bottom:6px">Facturas del mes</div>
           <div class="invoice-list" id="lista-mes"></div>
+          <button class="btn btn-primary" id="btn-generar" style="margin-top:12px; width:100%">Generar documento de Gastos</button>
         </div>
       </div>
     </section>
@@ -143,6 +148,25 @@
             <button class="filtro" data-modelo="gemini-2.5-flash">2.5 Flash</button>
           </div>
           <div class="gem-note" style="margin-top:8px">Con la llave, la app lee automáticamente fecha, NCF, RNC, ITBIS y total de cada factura. Sin llave o sin conexión, usa un OCR local en el teléfono (menos preciso, revisa los datos). Con Gemini, las imágenes se envían a Google; el nivel gratuito de AI Studio cubre el volumen típico.</div>
+        </div>
+        <div class="card">
+          <div class="eyebrow" style="margin-bottom:4px">Empresa (membrete del documento)</div>
+          <div style="display:flex; gap:10px; align-items:center; margin-top:8px">
+            <img id="emp-logo-prev" alt="Logo" style="width:84px; height:30px; object-fit:contain; background:rgba(127,127,127,.12); border-radius:6px" hidden>
+            <button class="btn btn-ghost btn-sm" id="emp-logo-btn" style="flex:1">Elegir logo…</button>
+            <input type="file" id="emp-logo-file" accept="image/*" hidden>
+          </div>
+          <label class="eyebrow" for="emp-razon" style="display:block; margin-top:10px">Razón social</label>
+          <input class="keyfield" id="emp-razon" placeholder="CLIENTE SRL">
+          <label class="eyebrow" for="emp-rnc" style="display:block; margin-top:10px">RNC</label>
+          <input class="keyfield" id="emp-rnc" placeholder="000-0000-00">
+          <label class="eyebrow" for="emp-ubicacion" style="display:block; margin-top:10px">Ubicación</label>
+          <input class="keyfield" id="emp-ubicacion" placeholder="Ciudad, Provincia, Rep. Dom.">
+          <label class="eyebrow" for="emp-tel" style="display:block; margin-top:10px">Teléfono</label>
+          <input class="keyfield" id="emp-tel" placeholder="+1 (000) 000-0000">
+          <label class="eyebrow" for="emp-correo" style="display:block; margin-top:10px">Correo</label>
+          <input class="keyfield" id="emp-correo" placeholder="correo@cliente.com">
+          <div class="gem-note" style="margin-top:8px">Estos datos forman el membrete de la portada y de cada página del documento de gastos.</div>
         </div>
         <button class="btn btn-ghost btn-sm" id="btn-otros" style="width:100%; margin:2px 0 10px; opacity:.75">Otros ajustes</button>
         <div class="card" id="otros-ajustes" hidden>

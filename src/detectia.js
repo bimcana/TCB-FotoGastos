@@ -3,17 +3,10 @@
 // falta; el service worker los cachea para uso offline posterior. Si algo falla
 // (sin red la primera vez, iOS sin WASM SIMD), devuelve null y el flujo sigue sin IA.
 import { esquinasDeMascara } from './detect.js';
+import { cargarScript } from './carga.js';
 
 const LADO = 320;
 let sesionProm = null;
-
-function cargarScript(src){
-  return new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = src; s.onload = res; s.onerror = () => rej(new Error('No se pudo cargar ' + src));
-    document.head.appendChild(s);
-  });
-}
 
 function sesion(){
   if (!sesionProm){

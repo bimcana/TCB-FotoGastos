@@ -134,6 +134,19 @@ export async function subirJPEG(blob, nombre, carpetaId){
   return r.json();
 }
 
+// Sube un archivo con nombre fijo; si ya existe en la carpeta, lo REEMPLAZA (una sola
+// version de Gastos_{Mes}.pdf y 606_{Mes}.xlsx por mes).
+export async function subirOReemplazar(blob, nombre, carpetaId){
+  const id = await buscarArchivo(carpetaId, nombre);
+  if (id){
+    const r = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=media`,
+      { method: 'PATCH', headers: { Authorization: 'Bearer ' + accessToken }, body: blob });
+    if (!r.ok) throw new Error('Reemplazo falló: ' + r.status + ' ' + await r.text());
+    return r.json();
+  }
+  return subirJPEG(blob, nombre, carpetaId); // multipart generico: sirve para cualquier blob
+}
+
 export async function leerJSON(carpetaId, nombre){
   const q = encodeURIComponent(`name='${nombre}' and '${carpetaId}' in parents and trashed=false`);
   const res = await api(`files?q=${q}&fields=files(id,name)&pageSize=1`);
