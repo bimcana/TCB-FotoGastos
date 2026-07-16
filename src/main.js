@@ -549,6 +549,40 @@ inpCarpeta.value = get('carpetaRaiz', 'Gastos_NCF');
 inpClient.addEventListener('change', () => set('clientId', inpClient.value.trim()));
 inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.value.trim() || 'Gastos_NCF'); set('carpetaRaizId', null); });
 
+// Perfil de empresa (membrete del documento de gastos) — Fase 3.
+import { empresaGuardada, guardarEmpresaLocal, empresaCompleta, archivoALogoB64 } from './empresa.js';
+
+const EMP_CAMPOS = { 'emp-razon':'razon', 'emp-rnc':'rnc', 'emp-ubicacion':'ubicacion', 'emp-tel':'tel', 'emp-correo':'correo' };
+
+function pintarEmpresa(){
+  const e = empresaGuardada();
+  for (const [id, campo] of Object.entries(EMP_CAMPOS)) document.getElementById(id).value = e[campo] || '';
+  const prev = document.getElementById('emp-logo-prev');
+  prev.hidden = !e.logoB64;
+  if (e.logoB64) prev.src = e.logoB64;
+}
+pintarEmpresa();
+
+async function guardarEmpresa(cambios){
+  const e = { ...empresaGuardada(), ...cambios };
+  guardarEmpresaLocal(e);
+  pintarEmpresa();
+  // Replica el membrete a la nube para que otras instalaciones lo hereden.
+  if (conectado() && get('carpetaRaizId')){
+    try { await guardarJSON(get('carpetaRaizId'), '_empresa.json', e); } catch(err){ console.error(err); }
+  }
+}
+for (const [id, campo] of Object.entries(EMP_CAMPOS)){
+  document.getElementById(id).addEventListener('change', ev => guardarEmpresa({ [campo]: ev.target.value.trim() }));
+}
+document.getElementById('emp-logo-btn').addEventListener('click', () => document.getElementById('emp-logo-file').click());
+document.getElementById('emp-logo-file').addEventListener('change', async ev => {
+  const f = ev.target.files[0]; ev.target.value = '';
+  if (!f) return;
+  try { await guardarEmpresa({ logoB64: await archivoALogoB64(f) }); toast('Logo guardado ✓'); }
+  catch(e){ console.error(e); toast('No se pudo leer el logo'); }
+});
+
 // "Otros ajustes": credenciales avanzadas (API key + Client ID) plegadas tras un PIN de
 // 4 numeros, para que el usuario normal no las toque por accidente. Es un candado de
 // conveniencia, no seguridad fuerte: la app entera corre en el telefono del usuario.
@@ -620,6 +654,13 @@ async function postConexion(){
   const raizId = await asegurarCarpeta(get('carpetaRaiz', 'Gastos_NCF'));
   set('carpetaRaizId', raizId);
   set('driveConectadoAntes', true); // habilita la reconexion silenciosa al abrir
+  // Hereda el membrete guardado en la nube si esta instalacion no lo tiene aun.
+  if (!empresaCompleta(empresaGuardada())){
+    try {
+      const e = await leerJSON(raizId, '_empresa.json');
+      if (e){ guardarEmpresaLocal(e); pintarEmpresa(); }
+    } catch(err){ console.error(err); }
+  }
   document.getElementById('drive-estado').textContent =
     `Conectado ✓ — carpeta «${get('carpetaRaiz', 'Gastos_NCF')}» lista`;
   const sub = document.getElementById('gastos-sub');
