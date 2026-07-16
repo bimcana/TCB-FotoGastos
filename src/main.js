@@ -130,6 +130,7 @@ async function procesarYRevisar(){
   document.getElementById('seg-proc').classList.toggle('on', !!r);
   document.getElementById('seg-orig').classList.toggle('on', !r);
   actualizarUIFiltros();
+  motorPreferido = 'ia'; // cada factura nueva vuelve al motor por defecto
   leerDatosDeFactura(); // los datos no dependen del color; no se repite al cambiar de filtro
 }
 window.procesarYRevisar = procesarYRevisar;
@@ -183,15 +184,36 @@ function setCamposHabilitados(hab){
   document.getElementById('confirm-btn').disabled = !hab;
 }
 
+// Motor elegido para ESTA factura (se restablece a IA en cada captura). El toggle solo
+// aparece con API key; sin key siempre es OCR local, como antes.
+let motorPreferido = 'ia';
+let abortLectura = null;
+
+function actualizarUIMotor(){
+  document.getElementById('motor-ia').classList.toggle('on', motorPreferido === 'ia');
+  document.getElementById('motor-ocr').classList.toggle('on', motorPreferido === 'ocr');
+}
+document.getElementById('motor-ia').addEventListener('click', () => {
+  if (motorPreferido === 'ia') return;
+  motorPreferido = 'ia'; leerDatosDeFactura();
+});
+document.getElementById('motor-ocr').addEventListener('click', () => {
+  if (motorPreferido === 'ocr') return;
+  motorPreferido = 'ocr'; leerDatosDeFactura();
+});
+
 async function leerDatosDeFactura(){
   const miGen = ++genOCR;
+  if (abortLectura){ abortLectura.abort(); abortLectura = null; } // cancela lectura previa
   const key = get('geminiKey', '');
   const origen = document.getElementById('datos-origen');
   const nota = document.getElementById('nota-verificar');
+  document.getElementById('motor-seg').hidden = !key;
+  actualizarUIMotor();
   vaciarCampos();
   nota.hidden = true;
-  // Reset del estado ANTES del await: si el usuario confirma durante la carga, no se
-  // suben metadatos de una factura anterior (riesgo de cumplimiento fiscal).
+  // Reset del estado ANTES del await: si el usuario confirma durante la carga, la factura
+  // sube como provisional (origen 'cargando'), nunca con metadatos de una factura anterior.
   window.__datos = { origen: 'cargando' };
   // Sin esquinas no se salta la lectura: se lee la imagen original completa.
   const canvas = window.__resultado?.canvasFinal || window.__resultado?.canvasOriginal;
@@ -202,22 +224,25 @@ async function leerDatosDeFactura(){
     await validarCampos(miGen);
     return;
   }
-  // Motor: con key intenta Gemini y si la red falla cae a OCR local; sin key, OCR local.
+  const usarIA = !!key && motorPreferido === 'ia';
   origen.hidden = false;
-  origen.textContent = key ? `Leyendo con ${ETIQUETA_MODELO[geminiModelo] || geminiModelo}…` : 'Leyendo (OCR local)…';
+  origen.textContent = usarIA ? `Leyendo con ${ETIQUETA_MODELO[geminiModelo] || geminiModelo}…` : 'Leyendo (OCR local)…';
   setCamposHabilitados(false);
   let datos = null, motor = 'manual';
   try {
-    if (key){
-      try { datos = await extraerDatos(canvas, key, geminiModelo); motor = 'gemini'; }
-      catch(e){ // sin conexión / error HTTP → respaldo local
+    if (usarIA){
+      abortLectura = new AbortController();
+      try { datos = await extraerDatos(canvas, key, geminiModelo, abortLectura.signal); motor = 'gemini'; }
+      catch(e){
+        // Cancelada (toggle a OCR, guardado o re-proceso): la nueva accion controla la UI.
+        if (e.name === 'AbortError') return;
         console.error(e);
         // Si el error es de credenciales/cuota (no de red), avisar que revise la API key
         // en vez de degradar en silencio; igual se cae a OCR local para no bloquear.
         if (/\b(400|401|403|429)\b/.test(e.message || '')) toast('Problema con la API key de Gemini — revísala en Ajustes');
         origen.textContent = 'Leyendo (OCR local)…';
         datos = await extraerDatosLocal(canvas); motor = 'local';
-      }
+      } finally { abortLectura = null; }
     } else {
       datos = await extraerDatosLocal(canvas); motor = 'local';
     }
@@ -422,6 +447,7 @@ function avanzarLoteOIr(destino){
 
 // Cancelar el lote (p. ej. al volver a Cámara desde Revisión a mitad de la validación).
 function cancelarLoteYVolver(){
+  if (abortLectura){ abortLectura.abort(); abortLectura = null; } // no seguir leyendo en vano
   if (window.__lote){ window.__lote = null; actualizarBarraLote(); }
   show('camara');
 }
