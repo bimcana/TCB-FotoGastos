@@ -10,7 +10,12 @@ export const CAJA = { y: 125.25, w: 198, h: 396 };  // y medido desde ARRIBA
 const ETIQ_Y = 532.5;                                // y de la etiqueta RD$ desde arriba
 const LOGO = { x: 48, y: 39.75, w: 168.75, h: 57 };
 const MEMBRETE = { x: 246.75, y: 45 };
-const RATIO_LARGA = 3; // alto/ancho mayor a esto = ticket largo → 2 columnas
+// REGLA DE ALTURA (Ari, 2026-07-19): por defecto cada factura se ESCALA completa a la
+// altura de su casilla — la gran mayoria (carta, gasolinera, restaurante) NUNCA se divide.
+// Division en 2 columnas SOLO para tickets muy largos (supermercado) que escalados
+// quedarian ilegibles. Umbral calibrado con 57 facturas reales: los ratios normales
+// llegan a 3.80 y los de supermercado empiezan en 4.35 → corte en 4.
+export const RATIO_LARGA = 4;
 
 export function paginar(items){
   const paginas = [];

@@ -96,18 +96,9 @@
         <div><h2>Gastos</h2><div class="hsub" id="gastos-sub">Sin conexión a la nube</div></div>
       </div>
       <div class="scroll">
-        <div class="card month-card">
-          <div class="eyebrow">Mes actual</div>
-          <div style="display:flex; align-items:center; gap:8px; margin-top:4px">
-            <button class="mes-flecha" id="mes-prev" aria-label="Mes anterior">‹</button>
-            <h3 style="margin:0; flex:1; text-align:center" class="num" id="mes-nombre">—</h3>
-            <button class="mes-flecha" id="mes-next" aria-label="Mes siguiente">›</button>
-          </div>
-          <div class="meta num" id="mes-meta" style="text-align:center">Conecta Google Drive en Ajustes</div>
-        </div>
-        <div class="card"><div class="eyebrow" style="margin-bottom:6px">Facturas del mes</div>
-          <div class="invoice-list" id="lista-mes"></div>
-          <button class="btn btn-primary" id="btn-generar" style="margin-top:12px; width:100%">Generar documento de Gastos</button>
+        <div class="card">
+          <div class="eyebrow" style="margin-bottom:6px">Carpeta de gastos</div>
+          <div id="gastos-arbol"><div class="gem-note">Conecta Google Drive en Ajustes.</div></div>
         </div>
       </div>
     </section>

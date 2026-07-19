@@ -560,6 +560,14 @@ html[data-theme="light"] #batch-count{color:#16202B}
 .cola-info span{ font-size:11px; color:var(--dim); }
 .cola-borrar{ background:none; border:none; font-size:17px; cursor:pointer; padding:6px; }
 
-/* --- Fase 3: selector de mes --- */
-.mes-flecha{ width:34px; height:34px; border-radius:10px; border:1px solid var(--line-soft); background:var(--glass); color:inherit; font-size:18px; cursor:pointer; }
-.mes-flecha:disabled{ opacity:.3; cursor:default; }
+/* --- Fase 4: acordeon de carpetas en Gastos --- */
+.acc-head{
+  display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+  padding:11px 4px; background:none; border:none; border-bottom:1px solid var(--line-soft);
+  color:inherit; font-family:inherit; font-size:13.5px; font-weight:700; cursor:pointer;
+}
+.acc-chev{ width:16px; color:var(--dim); }
+.acc-nom{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.acc-meta{ font-size:11px; font-weight:600; color:var(--dim); }
+.acc-body{ padding:2px 0 10px; }
+.acc-body[hidden]{ display:none; }

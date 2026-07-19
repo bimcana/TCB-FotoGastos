@@ -95,6 +95,7 @@ document.getElementById('shutter').addEventListener('click', async () => {
   if (disparando) return;
   if (!video.videoWidth) return toast('La cámara no está lista');
   const canvas = capturarFrame(video);
+  window.__origenAjeno = null; // una captura nueva jamas hereda el original de una ajena abandonada
   const fx = document.getElementById('flashfx');
   fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
   // Sin deteccion en vivo: reintenta sobre el still (con rescate) y luego con la IA local.
@@ -440,6 +441,7 @@ async function cargarSiguienteDelLote(){
 
 async function importarLote(files){
   if (!files || !files.length) return;
+  window.__origenAjeno = null; // el lote de galeria no toca originales de Drive
   await cvReady();
   window.__lote = { files, i: 0 };
   cargarSiguienteDelLote();
@@ -460,6 +462,7 @@ function avanzarLoteOIr(destino){
 function cancelarLoteYVolver(){
   if (abortLectura){ abortLectura.abort(); abortLectura = null; } // no seguir leyendo en vano
   if (window.__lote){ window.__lote = null; actualizarBarraLote(); }
+  window.__origenAjeno = null; // cancelar una ajena NO toca su original
   show('camara');
 }
 window.cancelarLoteYVolver = cancelarLoteYVolver;
@@ -640,8 +643,9 @@ modeloEl.addEventListener('click', (ev) => {
 
 // Conexión a Google Drive (Task 9)
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
-         buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar } from './drive.js';
-import { paginar, generarPDF } from './pdfgastos.js';
+         buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
+         listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion } from './drive.js';
+import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
 import { filas606, generarXLSX606 } from './f606.js';
 
 import { CLIENT_ID_APP } from './config.js';
@@ -738,14 +742,14 @@ window.addEventListener('load', () => setTimeout(reconectarSilencioso, 600));
 
 // Confirmar y subir + pantalla Gastos (Task 10)
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
-         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo, mesesDeCarpetas } from './naming.js';
+         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo } from './naming.js';
 
 // Cola offline en IndexedDB con reintento al reconectar (Task 11)
 import { encolar, pendientes, eliminar, cuenta } from './queue.js';
 
 // Índice _gastos.json por mes (Task 5): archiva por fecha de EMISIÓN (con respaldo a
 // la fecha del dispositivo), registra metadatos y marca duplicados sin bloquear la subida.
-import { agregarEntrada, entradaDeFactura, quitarEntrada } from './indice.js';
+import { agregarEntrada, entradaDeFactura, quitarEntrada, descDeEntrada, conciliarIndice } from './indice.js';
 
 // Archivos que el revisor esta leyendo AHORA (para el chip "Leyendo con IA…" en Gastos
 // y para rellenar el panel abierto al terminar).
@@ -793,13 +797,19 @@ function subirFactura(blob, datos){
     // Sin fecha de emision el nombre es provisional; el revisor lo re-archiva al conocerla.
     const nombre = fechaISO ? siguienteNombre(fechaISO, nombres)
                             : nombreUnico(nombreProvisional(), nombres);
-    const subida = await subirJPEG(blob, nombre, mesId);
     // El índice registra la fecha REALMENTE usada para archivar (fechaISO o ninguna), no el
     // texto crudo: siempre coincide con la carpeta donde quedó el archivo — trazabilidad 606.
     const entrada = entradaDeFactura(nombre, { ...datos, fechaEmision: fechaISO }, datos.origen || 'manual', !!dup);
-    entrada.driveId = subida.id; // permite re-archivar sin buscar por nombre (idempotente)
+    if (datos.procesadaDesde) entrada.procesadaDesde = datos.procesadaDesde; // trazabilidad de ajenas
     if (!fechaISO){ entrada.estado = 'pendiente'; entrada.provisional = true; }
-    await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada));
+    // La entrada viaja TAMBIEN en la description del archivo (multi-usuario: si el indice
+    // pierde esta entrada por una escritura concurrente, la conciliacion la restaura).
+    const subida = await subirJPEG(blob, nombre, mesId, descDeEntrada(entrada));
+    entrada.driveId = subida.id; // permite re-archivar sin buscar por nombre (idempotente)
+    // Si el guardado del indice falla tras subir el JPEG, un reintento; si aun asi falla,
+    // el archivo NO se pierde: su description lo restaura en la proxima conciliacion.
+    try { await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada)); }
+    catch(e){ console.error(e); await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada)); }
     // Si quedó incompleta, provisional o leída por OCR local, Gemini la revisa luego.
     if (entrada.estado !== 'completa'){
       try { await encolarRevision({ blob, mesId, archivo: nombre }); } catch(e){ console.error(e); }
@@ -824,6 +834,11 @@ function actualizarEntradaConReArchivo(mesId, archivo, mutador){
     const carpetaActual = await nombreDe(mesId);
     if (!fechaISO || !necesitaReArchivo(archivo, carpetaActual, fechaISO)){
       await guardarJSON(mesId, '_gastos.json', idx);
+      // Mantener los metadatos que viajan con el archivo (mejor esfuerzo).
+      try {
+        const fid = f.driveId || await buscarArchivo(mesId, archivo);
+        if (fid) await ponerDescripcion(fid, descDeEntrada(f));
+      } catch(e){ console.error(e); }
       return { nombreFinal: archivo, estado: f.estado, movidaA: null, entrada: f };
     }
     const carpetaDestino = nombreCarpetaMes(fechaISO);
@@ -832,10 +847,10 @@ function actualizarEntradaConReArchivo(mesId, archivo, mutador){
     const nombreFinal = siguienteNombre(fechaISO, await listarNombres(destinoId));
     const fileId = f.driveId || await buscarArchivo(mesId, archivo);
     if (!fileId) throw new Error('No se encontró ' + archivo + ' en Drive');
-    await moverYRenombrar(fileId, nombreFinal, destinoId, mesId);
     // OJO: entrada NUEVA sin mutar `f`, para que quitarEntrada (nombre viejo) si la elimine.
-    const entradaFinal = { ...f, archivo: nombreFinal };
+    const entradaFinal = { ...f, archivo: nombreFinal, driveId: fileId };
     delete entradaFinal.provisional;
+    await moverYRenombrar(fileId, nombreFinal, destinoId, mesId, descDeEntrada(entradaFinal));
     if (destinoId === mesId){
       await guardarJSON(mesId, '_gastos.json', agregarEntrada(quitarEntrada(idx, archivo), entradaFinal));
     } else {
@@ -854,11 +869,13 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
   // Guardar durante la lectura: se cancela la peticion en vuelo y la factura sube como
   // provisional (origen 'cargando'); la IA en background la lee y la re-archiva despues.
   if (abortLectura){ abortLectura.abort(); abortLectura = null; setCamposHabilitados(true); }
+  const origenAjeno = window.__origenAjeno || null; // factura llegada por fuera de la app
   const canvas = res.canvasFinal || res.canvasOriginal;
   // Se congelan los datos ANTES del await de la subida: si el usuario edita los campos
   // mientras la factura sube, no queremos que un cambio a mitad de camino contamine
   // el registro fiscal que se está escribiendo en _gastos.json.
-  const datos = window.__datos || {};
+  const datos = { ...(window.__datos || {}) };
+  if (origenAjeno) datos.procesadaDesde = origenAjeno.nombre; // el origen (gemini/local/manual) lo pone el motor que leyo
   const btn = document.getElementById('confirm-btn');
   btn.disabled = true; btn.textContent = 'Subiendo…';
   let blob;
@@ -877,6 +894,12 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
     toast(duplicada ? `Subida: ${nombre} — marcada como DUPLICADA (revísala en Gastos)`
         : esProvisional(nombre) ? 'Subida ✓ — la IA leerá los datos y la renombrará'
         : `Subida: ${nombre} ✓`);
+    if (origenAjeno){
+      // La procesada ya esta a salvo en Drive: el original crudo va a la papelera.
+      try { await moverAPapelera(origenAjeno.fileId); }
+      catch(e){ console.error(e); toast('El original sigue en la carpeta — puedes reintentarlo luego'); }
+      window.__origenAjeno = null;
+    }
     revisarPendientes(); // el revisor arranca de una vez, sin esperar a que abras Gastos
     avanzarLoteOIr('gastos');
   } catch(e){
@@ -1036,104 +1059,155 @@ async function revisarPendientes(){
 }
 window.addEventListener('online', revisarPendientes);
 
-// Selector de mes (Fase 3): Gastos opera sobre `mesVisto`; las flechas navegan entre
-// los meses con carpeta en Drive (el actual siempre esta). Ver un mes pasado NO crea
-// su carpeta: se usa buscarCarpeta, no asegurarCarpeta.
-let mesVisto = hoyISO().slice(0, 7);
-let mesesDisponibles = [mesVisto];
+// ---------- Gastos por niveles de carpeta (Fase 4) ----------
+// Acordeon de la carpeta matriz: secciones de mes (desc, actual expandido), otras
+// subcarpetas y «Carpeta principal» (sueltos en la raiz). El contenido se carga al
+// expandir. Cada seccion concilia su indice con los archivos reales: entradas perdidas
+// se restauran desde la description del archivo; imagenes sin datos = "Sin procesar".
+const seccionesAbiertas = new Set([nombreCarpetaMes(hoyISO())]);
+const ES_MES = /^\d{4}-\d{2}_/;
 
-function actualizarFlechasMes(){
-  const i = mesesDisponibles.indexOf(mesVisto);
-  document.getElementById('mes-prev').disabled = i <= 0;
-  document.getElementById('mes-next').disabled = i < 0 || i >= mesesDisponibles.length - 1;
+function filaFactura(ctx, e, nombre){
+  const CHIP_ESTADO = { incompleta: ['warn', 'Datos incompletos'], pendiente: ['info', 'Pendiente de revisión'] };
+  const inv = document.createElement('div');
+  inv.className = (e && e.duplicada) ? 'inv dup' : 'inv';
+  const thumb = document.createElement('div'); thumb.className = 'thumb'; thumb.textContent = 'JPG';
+  const info = document.createElement('div');
+  const nm = document.createElement('div'); nm.className = 'nm num'; nm.textContent = nombre;
+  info.appendChild(nm);
+  if (e && (e.fechaEmision || e.nombreComercio)){
+    const dt = document.createElement('div'); dt.className = 'dt num';
+    dt.textContent = [e.fechaEmision, e.nombreComercio].filter(Boolean).join(' · ');
+    info.appendChild(dt);
+  }
+  const amt = document.createElement('div'); amt.className = 'amt';
+  if (e && e.total != null){
+    const b = document.createElement('b'); b.className = 'num';
+    b.textContent = 'RD$ ' + Number(e.total).toLocaleString('es-DO', { minimumFractionDigits: 2 });
+    amt.appendChild(b);
+  }
+  const chip = document.createElement('span');
+  chip.style.cssText = 'margin-top:4px; font-size:10px; padding:2px 8px';
+  if (archivosEnLectura.has(nombre)){
+    chip.className = 'chip info leyendo';
+    chip.innerHTML = '<span class="dot"></span>Leyendo con IA…';
+    amt.appendChild(chip);
+  } else if (!e){
+    chip.className = 'chip warn';
+    chip.innerHTML = '<span class="dot"></span>Sin procesar';
+    amt.appendChild(chip);
+  } else if (CHIP_ESTADO[e.estado]){
+    const est = CHIP_ESTADO[e.estado];
+    chip.className = 'chip ' + est[0];
+    chip.innerHTML = '<span class="dot"></span>' + est[1];
+    amt.appendChild(chip);
+  }
+  inv.style.cursor = 'pointer';
+  if (e){
+    inv.addEventListener('click', () => { window.__gastosMes = ctx; abrirRevisar(e.archivo); });
+  } else {
+    inv.addEventListener('click', () => procesarAjena(ctx, nombre));
+  }
+  inv.appendChild(thumb); inv.appendChild(info);
+  if (amt.childNodes.length) inv.appendChild(amt);
+  return inv;
 }
-document.getElementById('mes-prev').addEventListener('click', () => {
-  const i = mesesDisponibles.indexOf(mesVisto);
-  if (i > 0){ mesVisto = mesesDisponibles[i - 1]; refrescarGastos(); }
-});
-document.getElementById('mes-next').addEventListener('click', () => {
-  const i = mesesDisponibles.indexOf(mesVisto);
-  if (i >= 0 && i < mesesDisponibles.length - 1){ mesVisto = mesesDisponibles[i + 1]; refrescarGastos(); }
-});
+
+async function renderSeccion(carpeta, bodyEl, metaEl){
+  bodyEl.innerHTML = '<div class="gem-note">Cargando…</div>';
+  try {
+    const archivos = await listarArchivos(carpeta.id);
+    const idx = carpeta.esMes ? await leerJSON(carpeta.id, '_gastos.json').catch(() => null) : null;
+    const conc = conciliarIndice(idx, archivos);
+    // Persistir restauraciones (bajo el mutex, re-leyendo fresco para no pisar a nadie).
+    if (carpeta.esMes && conc.restauradas.length){
+      conLockIndice(async () => {
+        let vivo = await leerJSON(carpeta.id, '_gastos.json');
+        const hay = new Set((vivo?.facturas || []).map(f => f.archivo));
+        let cambio = false;
+        for (const r of conc.restauradas){
+          if (!hay.has(r.archivo)){ vivo = agregarEntrada(vivo, r); cambio = true; }
+        }
+        if (cambio) await guardarJSON(carpeta.id, '_gastos.json', vivo);
+      }).catch(e => console.error(e));
+      toast(`Se restauraron ${conc.restauradas.length} factura(s) del índice de ${carpeta.name}`);
+    }
+    const ctx = { mesId: carpeta.id, idx: conc.indice, carpetaNombre: carpeta.name, esMes: carpeta.esMes };
+    const idPorNombre = new Map(archivos.map(a => [a.name, a.id]));
+    ctx.idPorNombre = idPorNombre;
+    const entradas = (conc.indice?.facturas || []);
+    const num = n => { const m = String(n).match(/^Compra_(\d+)/i); return m ? parseInt(m[1], 10) : -1; };
+    entradas.sort((a, b) => num(b.archivo) - num(a.archivo));
+    bodyEl.innerHTML = '';
+    if (!entradas.length && !conc.sinProcesar.length){
+      bodyEl.innerHTML = '<div class="gem-note">Sin facturas aquí.</div>';
+    }
+    for (const n of conc.sinProcesar) bodyEl.appendChild(filaFactura(ctx, null, n)); // primero lo que pide accion
+    for (const e of entradas) bodyEl.appendChild(filaFactura(ctx, e, e.archivo));
+    if (carpeta.esMes){
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-primary';
+      btn.style.cssText = 'margin-top:12px; width:100%';
+      btn.textContent = 'Generar documento de Gastos';
+      btn.addEventListener('click', () => { window.__gastosMes = ctx; generarDocumento(ctx); });
+      bodyEl.appendChild(btn);
+    }
+    const nPend = entradas.filter(f => f.estado === 'incompleta' || f.estado === 'pendiente').length;
+    metaEl.textContent = `${entradas.length + conc.sinProcesar.length}` +
+      (nPend ? ` · ${nPend} por revisar` : '') +
+      (conc.sinProcesar.length ? ` · ${conc.sinProcesar.length} sin procesar` : '');
+  } catch(e){
+    console.error(e);
+    bodyEl.innerHTML = '<div class="gem-note">No se pudo cargar esta carpeta.</div>';
+  }
+}
 
 async function refrescarGastos(){
   const raizId = get('carpetaRaizId');
-  const carpetaMes = nombreCarpetaMes(mesVisto + '-01');
-  document.getElementById('mes-nombre').textContent = carpetaMes;
-  if (!conectado() || !raizId) return;
+  const arbol = document.getElementById('gastos-arbol');
+  if (!conectado() || !raizId){
+    arbol.innerHTML = '<div class="gem-note">Conecta Google Drive en Ajustes.</div>';
+    return;
+  }
   try {
-    mesesDisponibles = mesesDeCarpetas(await listarNombres(raizId), hoyISO());
-    actualizarFlechasMes();
-    const esMesActual = mesVisto === hoyISO().slice(0, 7);
-    const mesId = esMesActual ? await asegurarCarpeta(carpetaMes, raizId)
-                              : await buscarCarpeta(carpetaMes, raizId);
-    if (!mesId){
-      document.getElementById('mes-meta').textContent = 'Este mes no tiene facturas.';
-      document.getElementById('lista-mes').innerHTML = '<div class="gem-note">Sin facturas registradas.</div>';
-      window.__gastosMes = null;
-      return;
-    }
-    // El índice es opcional (mes recién creado o _gastos.json aún inexistente); si falla
-    // la lectura, se sigue mostrando la lista sin el marcado de duplicadas.
-    const [nombres, idx] = await Promise.all([
-      listarNombres(mesId).then(ns => ns.filter(n => /^(Compra|Pendiente)_/i.test(n))),
-      leerJSON(mesId, '_gastos.json').catch(() => null)
-    ]);
-    const entradaPorArchivo = new Map((idx?.facturas || []).map(f => [f.archivo, f]));
-    window.__gastosMes = { mesId, idx }; // contexto para confirmar una factura pendiente
-    const num = n => { const m = n.match(/^Compra_(\d+)/i); return m ? parseInt(m[1], 10) : -1; };
-    nombres.sort((a, b) => num(b) - num(a));
-    const nPend = (idx?.facturas || []).filter(f => f.estado === 'incompleta' || f.estado === 'pendiente').length;
-    document.getElementById('mes-meta').textContent =
-      `${nombres.length} facturas este mes` + (nPend ? ` · ${nPend} por revisar` : '');
-    const lista = document.getElementById('lista-mes');
-    lista.innerHTML = '';
-    if (!nombres.length){
-      lista.innerHTML = '<div class="gem-note">Aún no hay facturas este mes.</div>';
-    } else {
-      const CHIP_ESTADO = { incompleta: ['warn', 'Datos incompletos'], pendiente: ['info', 'Pendiente de revisión'] };
-      nombres.forEach(n => {
-        const e = entradaPorArchivo.get(n);
-        const inv = document.createElement('div');
-        inv.className = (e && e.duplicada) ? 'inv dup' : 'inv';
-        const thumb = document.createElement('div'); thumb.className = 'thumb'; thumb.textContent = 'JPG';
-        const info = document.createElement('div');
-        const nm = document.createElement('div'); nm.className = 'nm num'; nm.textContent = n;
-        info.appendChild(nm);
-        if (e && (e.fechaEmision || e.nombreComercio)){
-          const dt = document.createElement('div'); dt.className = 'dt num';
-          dt.textContent = [e.fechaEmision, e.nombreComercio].filter(Boolean).join(' · ');
-          info.appendChild(dt);
+    // Asegura la carpeta del mes actual (las capturas nuevas van ahi) y lista el arbol.
+    await asegurarCarpeta(nombreCarpetaMes(hoyISO()), raizId);
+    const [carpetas, sueltosTodos] = await Promise.all([listarCarpetas(raizId), listarArchivos(raizId)]);
+    const meses = carpetas.filter(c => ES_MES.test(c.name)).sort((a, b) => b.name.localeCompare(a.name));
+    const otras = carpetas.filter(c => !ES_MES.test(c.name)).sort((a, b) => a.name.localeCompare(b.name));
+    const sueltos = sueltosTodos.filter(a => /image\//i.test(a.mimeType || ''));
+    const secciones = [
+      ...meses.map(c => ({ id: c.id, name: c.name, esMes: true })),
+      ...otras.map(c => ({ id: c.id, name: c.name, esMes: false }))
+    ];
+    if (sueltos.length) secciones.push({ id: raizId, name: 'Carpeta principal', esMes: false, soloSueltos: true });
+    arbol.innerHTML = '';
+    for (const sec of secciones){
+      const head = document.createElement('button');
+      head.className = 'acc-head';
+      const abierta = seccionesAbiertas.has(sec.name);
+      head.innerHTML = `<span class="acc-chev">${abierta ? '▾' : '▸'}</span><span class="acc-nom num">${sec.name}</span><span class="acc-meta num"></span>`;
+      const body = document.createElement('div');
+      body.className = 'acc-body';
+      body.hidden = !abierta;
+      const metaEl = head.querySelector('.acc-meta');
+      head.addEventListener('click', async () => {
+        if (body.hidden){
+          seccionesAbiertas.add(sec.name);
+          body.hidden = false;
+          head.querySelector('.acc-chev').textContent = '▾';
+          await renderSeccion(sec, body, metaEl);
+        } else {
+          seccionesAbiertas.delete(sec.name);
+          body.hidden = true;
+          head.querySelector('.acc-chev').textContent = '▸';
         }
-        const amt = document.createElement('div'); amt.className = 'amt';
-        if (e && e.total != null){
-          const b = document.createElement('b'); b.className = 'num';
-          b.textContent = 'RD$ ' + Number(e.total).toLocaleString('es-DO', { minimumFractionDigits: 2 });
-          amt.appendChild(b);
-        }
-        const est = e && CHIP_ESTADO[e.estado];
-        if (archivosEnLectura.has(n)){
-          const chip = document.createElement('span');
-          chip.className = 'chip info leyendo';
-          chip.style.cssText = 'margin-top:4px; font-size:10px; padding:2px 8px';
-          chip.innerHTML = '<span class="dot"></span>Leyendo con IA…';
-          amt.appendChild(chip);
-        } else if (est){
-          const chip = document.createElement('span');
-          chip.className = 'chip ' + est[0];
-          chip.style.cssText = 'margin-top:4px; font-size:10px; padding:2px 8px';
-          chip.innerHTML = '<span class="dot"></span>' + est[1];
-          amt.appendChild(chip);
-        }
-        if (e){ // toda factura con entrada en el indice se puede abrir y editar
-          inv.style.cursor = 'pointer';
-          inv.addEventListener('click', () => abrirRevisar(e.archivo));
-        }
-        inv.appendChild(thumb); inv.appendChild(info);
-        if (amt.childNodes.length) inv.appendChild(amt);
-        lista.appendChild(inv);
       });
+      arbol.appendChild(head);
+      arbol.appendChild(body);
+      if (abierta) renderSeccion(sec, body, metaEl);
     }
+    if (!secciones.length) arbol.innerHTML = '<div class="gem-note">Aún no hay facturas en la carpeta.</div>';
   } catch(e){ console.error(e); }
 }
 document.getElementById('tab-gastos').addEventListener('click', () => { refrescarGastos(); revisarPendientes(); });
@@ -1143,7 +1217,7 @@ document.getElementById('tab-gastos').addEventListener('click', () => { refresca
 async function prepararImagen(blob){
   const canvas = await archivoACanvas(blob);
   const ratio = canvas.height / canvas.width;
-  if (ratio <= 3) return { ratio, partes: [blob] }; // JPEG original tal cual
+  if (ratio <= RATIO_LARGA) return { ratio, partes: [blob] }; // JPEG original tal cual (mismo umbral que paginar)
   const partes = [];
   for (const [t, b] of [[0, 0.48], [0.5, 1]]){
     const c = document.createElement('canvas');
@@ -1154,8 +1228,7 @@ async function prepararImagen(blob){
   return { ratio, partes };
 }
 
-async function generarDocumento(){
-  const ctx = window.__gastosMes;
+async function generarDocumento(ctx){
   if (!conectado() || !ctx || !ctx.mesId) return toast('Conecta Google Drive para generar');
   const emp = empresaGuardada();
   if (!empresaCompleta(emp)){ toast('Configura la Empresa en Ajustes (razón social y RNC)'); show('ajustes'); return; }
@@ -1166,11 +1239,10 @@ async function generarDocumento(){
   const sinValidar = todas.filter(f => f.estado !== 'completa').length;
   if (!completas.length) return toast('No hay facturas completas — valida las pendientes primero');
   if (sinValidar && !confirm(`Hay ${sinValidar} factura(s) sin validar. ¿Generar solo con las ${completas.length} completas?`)) return;
-  const carpetaMes = nombreCarpetaMes(mesVisto + '-01');                    // '2025-06_Junio'
-  const mesTexto = `${carpetaMes.split('_')[1]} ${mesVisto.slice(0, 4)}`;   // 'Junio 2025'
-  const btn = document.getElementById('btn-generar');
+  const periodo = ctx.carpetaNombre.slice(0, 7);                                  // '2025-06'
+  const mesTexto = `${ctx.carpetaNombre.split('_')[1]} ${periodo.slice(0, 4)}`;   // 'Junio 2025'
   const bar = document.getElementById('lote-bar'), txtBar = document.getElementById('lote-txt');
-  btn.disabled = true; bar.hidden = false; document.getElementById('lote-dots').innerHTML = '';
+  bar.hidden = false; document.getElementById('lote-dots').innerHTML = '';
   try {
     const items = [];
     for (let i = 0; i < completas.length; i++){
@@ -1187,7 +1259,7 @@ async function generarDocumento(){
     txtBar.textContent = 'Generando — armando el PDF…';
     const pdfBlob = await generarPDF(paginar(items), emp, mesTexto);
     txtBar.textContent = 'Generando — armando el Excel 606…';
-    const xlsxBlob = await generarXLSX606(filas606(todas, mesVisto), emp, mesVisto, mesTexto);
+    const xlsxBlob = await generarXLSX606(filas606(todas, periodo), emp, periodo, mesTexto);
     txtBar.textContent = 'Generando — subiendo a Drive…';
     const nombrePDF = `Gastos_${mesTexto.replace(' ', '_')}.pdf`;
     const nombreXLSX = `606_${mesTexto.replace(' ', '_')}.xlsx`;
@@ -1202,9 +1274,34 @@ async function generarDocumento(){
     }
     toast(`Documento de ${mesTexto} generado y guardado en Drive ✓`);
   } catch(e){ console.error(e); toast('No se pudo generar: ' + e.message); }
-  finally { btn.disabled = false; bar.hidden = true; actualizarBarraLote(); }
+  finally { bar.hidden = true; actualizarBarraLote(); }
 }
-document.getElementById('btn-generar').addEventListener('click', generarDocumento);
+
+// ---------- Factura ajena "Sin procesar" (Fase 4) ----------
+// Imagen que llego a la carpeta por fuera de la app (Drive directo, version Lite futura):
+// se descarga y entra al MISMO pipeline (recorte automatico → editor → datos IA/OCR).
+// Al confirmar, el original va a la papelera (recuperable 30 dias).
+async function procesarAjena(ctx, nombre){
+  const fileId = ctx.idPorNombre?.get(nombre);
+  if (!fileId) return toast('No se encontró el archivo en Drive');
+  toast('Descargando imagen…');
+  let canvas;
+  try {
+    const blob = await descargarPorId(fileId);
+    if (!blob) return toast('No se pudo descargar la imagen');
+    canvas = await archivoACanvas(blob);
+  } catch(e){
+    console.error(e);
+    return toast('Formato no compatible en este dispositivo — conviértelo a JPG');
+  }
+  await cvReady();
+  let esquinas = detectarDocumento(canvas, 1200);
+  if (!esquinas) esquinas = await detectarConIAConOverlay(canvas);
+  esquinas = await abrirEditorEsquinas(canvas, esquinas);
+  window.__captura = { canvas, esquinas };
+  window.__origenAjeno = { fileId, nombre }; // al confirmar: original a la papelera
+  procesarYRevisar();
+}
 
 // ---------- Confirmación de una factura pendiente (panel de revisión) ----------
 const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-itbis':'itbis','rv-total':'total' };
