@@ -19,7 +19,10 @@ function limpiarToken(){
 export function initAuth(clientId){
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: clientId,
-    scope: 'https://www.googleapis.com/auth/drive.file',
+    // Fase 4: acceso amplio (necesario para VER archivos que otros suban a la carpeta
+    // matriz — drive.file solo muestra lo creado por la app). La app queda RESTRINGIDA
+    // en codigo a la carpeta matriz: toda operacion parte de carpetaRaizId.
+    scope: 'https://www.googleapis.com/auth/drive',
     callback: () => {}
   });
 }
@@ -79,9 +82,44 @@ export async function asegurarCarpeta(nombre, padreId = null){
 
 export async function buscarCarpeta(nombre, padreId = null){
   const filtroPadre = padreId ? ` and '${padreId}' in parents` : '';
-  const q = encodeURIComponent(`name='${nombre.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${filtroPadre}`);
+  const q = encodeURIComponent(`name='${nombre.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${filtroPadre}`);
   const res = await api(`files?q=${q}&fields=files(id)&pageSize=1`);
   return res.files.length ? res.files[0].id : null;
+}
+
+export async function listarCarpetas(padreId){
+  const q = encodeURIComponent(`'${padreId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const res = await api(`files?q=${q}&fields=files(id,name)&pageSize=1000`);
+  return res.files;
+}
+
+// Listado con lo necesario para conciliar: nombre, tipo y description (metadatos propios).
+export async function listarArchivos(carpetaId){
+  const q = encodeURIComponent(`'${carpetaId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed=false`);
+  const res = await api(`files?q=${q}&fields=files(id,name,mimeType,description)&pageSize=1000`);
+  return res.files;
+}
+
+export async function descargarPorId(fileId){
+  const r = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`,
+    { headers: { Authorization: 'Bearer ' + accessToken } });
+  if (!r.ok) return null;
+  return r.blob();
+}
+
+// A la papelera (recuperable 30 dias) — para el original de una factura ajena procesada.
+export async function moverAPapelera(fileId){
+  return api(`files/${fileId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ trashed: true })
+  });
+}
+
+export async function ponerDescripcion(fileId, texto){
+  return api(`files/${fileId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ description: texto })
+  });
 }
 
 export async function buscarArchivo(carpetaId, nombre){
@@ -95,14 +133,15 @@ export async function nombreDe(fileId){
   return r.name;
 }
 
-// Renombra y (si cambia el padre) mueve el archivo en UNA sola llamada PATCH.
-export async function moverYRenombrar(fileId, nuevoNombre, nuevoPadreId, viejoPadreId){
+// Renombra y (si cambia el padre) mueve el archivo en UNA sola llamada PATCH;
+// opcionalmente actualiza tambien su description (metadatos que viajan con el archivo).
+export async function moverYRenombrar(fileId, nuevoNombre, nuevoPadreId, viejoPadreId, description = undefined){
   const params = (nuevoPadreId && viejoPadreId && nuevoPadreId !== viejoPadreId)
     ? `?addParents=${nuevoPadreId}&removeParents=${viejoPadreId}` : '';
   return api(`files/${fileId}${params}`, {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: nuevoNombre })
+    body: JSON.stringify({ name: nuevoNombre, ...(description ? { description } : {}) })
   });
 }
 
@@ -122,10 +161,10 @@ export async function listarNombres(carpetaId){
   return res.files.map(f => f.name);
 }
 
-export async function subirJPEG(blob, nombre, carpetaId){
+export async function subirJPEG(blob, nombre, carpetaId, description = undefined){
   const fd = new FormData();
   fd.append('metadata', new Blob(
-    [JSON.stringify({ name: nombre, parents: [carpetaId] })], { type: 'application/json' }));
+    [JSON.stringify({ name: nombre, parents: [carpetaId], ...(description ? { description } : {}) })], { type: 'application/json' }));
   fd.append('file', blob);
   const r = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name', {
     method: 'POST', headers: { Authorization: 'Bearer ' + accessToken }, body: fd

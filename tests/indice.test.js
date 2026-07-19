@@ -1,6 +1,48 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { entradaDeFactura, agregarEntrada, quitarEntrada } from '../src/indice.js';
+import { entradaDeFactura, agregarEntrada, quitarEntrada, descDeEntrada, entradaDeDesc, conciliarIndice } from '../src/indice.js';
+
+test('descDeEntrada/entradaDeDesc: ida y vuelta con version', () => {
+  const e = { archivo: 'Compra_031.jpg', fechaEmision: '2025-06-03', ncf: 'B0100182291', rncEmisor: '131067603',
+              nombreComercio: 'X', subtotal: 100, itbis: 18, total: 118, estado: 'completa', origen: 'gemini', duplicada: false };
+  const vuelta = entradaDeDesc(descDeEntrada(e));
+  assert.equal(vuelta.ncf, 'B0100182291');
+  assert.equal(vuelta.total, 118);
+  assert.equal(vuelta.estado, 'completa');
+  assert.equal(vuelta.archivo, 'Compra_031.jpg');
+});
+
+test('entradaDeDesc tolera basura y descripciones ajenas', () => {
+  assert.equal(entradaDeDesc('cualquier texto humano'), null);
+  assert.equal(entradaDeDesc('{"sin":"version"}'), null);
+  assert.equal(entradaDeDesc(''), null);
+  assert.equal(entradaDeDesc(null), null);
+});
+
+test('conciliarIndice restaura entradas perdidas desde description', () => {
+  const idx = { facturas: [{ archivo: 'Compra_010.jpg', ncf: 'B01A', estado: 'completa' }] };
+  const archivos = [
+    { name: 'Compra_010.jpg', mimeType: 'image/jpeg', description: '' },              // ya indexada
+    { name: 'Compra_011.jpg', mimeType: 'image/jpeg',
+      description: descDeEntrada({ archivo: 'Compra_011.jpg', ncf: 'B01B', estado: 'pendiente', total: 5 }) }, // perdida → restaurar
+    { name: 'IMG_9999.jpeg', mimeType: 'image/jpeg', description: 'nota humana' },    // ajena
+    { name: '_gastos.json', mimeType: 'application/json', description: '' }           // no imagen
+  ];
+  const r = conciliarIndice(idx, archivos);
+  assert.equal(r.restauradas.length, 1);
+  assert.equal(r.restauradas[0].archivo, 'Compra_011.jpg');
+  assert.deepEqual(r.sinProcesar, ['IMG_9999.jpeg']);
+  assert.equal(r.indice.facturas.length, 2);
+  assert.equal(idx.facturas.length, 1); // sin mutar
+});
+
+test('conciliarIndice marca duplicada la restaurada si su NCF ya existe', () => {
+  const idx = { facturas: [{ archivo: 'Compra_010.jpg', ncf: 'B0100182291', estado: 'completa' }] };
+  const archivos = [{ name: 'Compra_011.jpg', mimeType: 'image/jpeg',
+    description: descDeEntrada({ archivo: 'Compra_011.jpg', ncf: 'B0100182291', estado: 'completa' }) }];
+  const r = conciliarIndice(idx, archivos);
+  assert.equal(r.restauradas[0].duplicada, true);
+});
 
 test('quitarEntrada elimina por nombre de archivo sin mutar', () => {
   const idx = { facturas: [{ archivo: 'a.jpg' }, { archivo: 'b.jpg' }] };

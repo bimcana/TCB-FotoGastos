@@ -640,7 +640,8 @@ modeloEl.addEventListener('click', (ev) => {
 
 // Conexión a Google Drive (Task 9)
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
-         buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar } from './drive.js';
+         buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
+         listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion } from './drive.js';
 import { paginar, generarPDF } from './pdfgastos.js';
 import { filas606, generarXLSX606 } from './f606.js';
 
@@ -745,7 +746,7 @@ import { encolar, pendientes, eliminar, cuenta } from './queue.js';
 
 // Índice _gastos.json por mes (Task 5): archiva por fecha de EMISIÓN (con respaldo a
 // la fecha del dispositivo), registra metadatos y marca duplicados sin bloquear la subida.
-import { agregarEntrada, entradaDeFactura, quitarEntrada } from './indice.js';
+import { agregarEntrada, entradaDeFactura, quitarEntrada, descDeEntrada, conciliarIndice } from './indice.js';
 
 // Archivos que el revisor esta leyendo AHORA (para el chip "Leyendo con IA…" en Gastos
 // y para rellenar el panel abierto al terminar).
@@ -793,13 +794,18 @@ function subirFactura(blob, datos){
     // Sin fecha de emision el nombre es provisional; el revisor lo re-archiva al conocerla.
     const nombre = fechaISO ? siguienteNombre(fechaISO, nombres)
                             : nombreUnico(nombreProvisional(), nombres);
-    const subida = await subirJPEG(blob, nombre, mesId);
     // El índice registra la fecha REALMENTE usada para archivar (fechaISO o ninguna), no el
     // texto crudo: siempre coincide con la carpeta donde quedó el archivo — trazabilidad 606.
     const entrada = entradaDeFactura(nombre, { ...datos, fechaEmision: fechaISO }, datos.origen || 'manual', !!dup);
-    entrada.driveId = subida.id; // permite re-archivar sin buscar por nombre (idempotente)
     if (!fechaISO){ entrada.estado = 'pendiente'; entrada.provisional = true; }
-    await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada));
+    // La entrada viaja TAMBIEN en la description del archivo (multi-usuario: si el indice
+    // pierde esta entrada por una escritura concurrente, la conciliacion la restaura).
+    const subida = await subirJPEG(blob, nombre, mesId, descDeEntrada(entrada));
+    entrada.driveId = subida.id; // permite re-archivar sin buscar por nombre (idempotente)
+    // Si el guardado del indice falla tras subir el JPEG, un reintento; si aun asi falla,
+    // el archivo NO se pierde: su description lo restaura en la proxima conciliacion.
+    try { await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada)); }
+    catch(e){ console.error(e); await guardarJSON(mesId, '_gastos.json', agregarEntrada(idx, entrada)); }
     // Si quedó incompleta, provisional o leída por OCR local, Gemini la revisa luego.
     if (entrada.estado !== 'completa'){
       try { await encolarRevision({ blob, mesId, archivo: nombre }); } catch(e){ console.error(e); }
@@ -824,6 +830,11 @@ function actualizarEntradaConReArchivo(mesId, archivo, mutador){
     const carpetaActual = await nombreDe(mesId);
     if (!fechaISO || !necesitaReArchivo(archivo, carpetaActual, fechaISO)){
       await guardarJSON(mesId, '_gastos.json', idx);
+      // Mantener los metadatos que viajan con el archivo (mejor esfuerzo).
+      try {
+        const fid = f.driveId || await buscarArchivo(mesId, archivo);
+        if (fid) await ponerDescripcion(fid, descDeEntrada(f));
+      } catch(e){ console.error(e); }
       return { nombreFinal: archivo, estado: f.estado, movidaA: null, entrada: f };
     }
     const carpetaDestino = nombreCarpetaMes(fechaISO);
@@ -832,10 +843,10 @@ function actualizarEntradaConReArchivo(mesId, archivo, mutador){
     const nombreFinal = siguienteNombre(fechaISO, await listarNombres(destinoId));
     const fileId = f.driveId || await buscarArchivo(mesId, archivo);
     if (!fileId) throw new Error('No se encontró ' + archivo + ' en Drive');
-    await moverYRenombrar(fileId, nombreFinal, destinoId, mesId);
     // OJO: entrada NUEVA sin mutar `f`, para que quitarEntrada (nombre viejo) si la elimine.
-    const entradaFinal = { ...f, archivo: nombreFinal };
+    const entradaFinal = { ...f, archivo: nombreFinal, driveId: fileId };
     delete entradaFinal.provisional;
+    await moverYRenombrar(fileId, nombreFinal, destinoId, mesId, descDeEntrada(entradaFinal));
     if (destinoId === mesId){
       await guardarJSON(mesId, '_gastos.json', agregarEntrada(quitarEntrada(idx, archivo), entradaFinal));
     } else {
