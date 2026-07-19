@@ -643,7 +643,7 @@ modeloEl.addEventListener('click', (ev) => {
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
          buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
          listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion } from './drive.js';
-import { paginar, generarPDF } from './pdfgastos.js';
+import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
 import { filas606, generarXLSX606 } from './f606.js';
 
 import { CLIENT_ID_APP } from './config.js';
@@ -1215,7 +1215,7 @@ document.getElementById('tab-gastos').addEventListener('click', () => { refresca
 async function prepararImagen(blob){
   const canvas = await archivoACanvas(blob);
   const ratio = canvas.height / canvas.width;
-  if (ratio <= 3) return { ratio, partes: [blob] }; // JPEG original tal cual
+  if (ratio <= RATIO_LARGA) return { ratio, partes: [blob] }; // JPEG original tal cual (mismo umbral que paginar)
   const partes = [];
   for (const [t, b] of [[0, 0.48], [0.5, 1]]){
     const c = document.createElement('canvas');
