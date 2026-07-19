@@ -95,6 +95,7 @@ document.getElementById('shutter').addEventListener('click', async () => {
   if (disparando) return;
   if (!video.videoWidth) return toast('La cámara no está lista');
   const canvas = capturarFrame(video);
+  window.__origenAjeno = null; // una captura nueva jamas hereda el original de una ajena abandonada
   const fx = document.getElementById('flashfx');
   fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
   // Sin deteccion en vivo: reintenta sobre el still (con rescate) y luego con la IA local.
@@ -440,6 +441,7 @@ async function cargarSiguienteDelLote(){
 
 async function importarLote(files){
   if (!files || !files.length) return;
+  window.__origenAjeno = null; // el lote de galeria no toca originales de Drive
   await cvReady();
   window.__lote = { files, i: 0 };
   cargarSiguienteDelLote();

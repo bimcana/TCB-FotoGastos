@@ -3,7 +3,13 @@ let tokenClient = null, accessToken = null, expiraEn = 0;
 // El token de acceso vive ~1 h: se persiste para que reabrir la app dentro de esa
 // ventana NO requiera reconectar (la causa principal del "Drive se desconecta").
 // En 401 (vencido/revocado) se limpia y la UI ofrece reconectar.
+// Version de scope: al subir de drive.file a drive (Fase 4), los tokens viejos siguen
+// "validos" pero NO ven archivos ajenos — se invalidan para forzar el consentimiento nuevo.
 try {
+  if (localStorage.getItem('tcb:scopeV') !== '2'){
+    localStorage.removeItem('tcb:driveToken');
+    localStorage.setItem('tcb:scopeV', '2');
+  }
   const t = JSON.parse(localStorage.getItem('tcb:driveToken') || 'null');
   if (t && t.accessToken && Date.now() < t.expiraEn){ accessToken = t.accessToken; expiraEn = t.expiraEn; }
 } catch(e){}

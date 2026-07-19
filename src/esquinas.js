@@ -12,7 +12,10 @@ const el = id => document.getElementById(id);
 export function abrirEditorEsquinas(canvasOriginal, esquinasIniciales){
   return new Promise(resolve => {
     if (estado) cerrar(null); // solo un editor a la vez
-    const m = 0.1;
+    // Sin deteccion previa, las esquinas arrancan casi a MARCO COMPLETO (2%): la
+    // calibracion con fotos reales mostro que ese caso es tipicamente una imagen ya
+    // recortada (escaneo/WhatsApp), donde "Aplicar" sin mover nada es lo correcto.
+    const m = 0.02;
     const esquinas = (esquinasIniciales || [
       { x: canvasOriginal.width * m,       y: canvasOriginal.height * m },
       { x: canvasOriginal.width * (1 - m), y: canvasOriginal.height * m },
