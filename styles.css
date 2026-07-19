@@ -571,3 +571,12 @@ html[data-theme="light"] #batch-count{color:#16202B}
 .acc-meta{ font-size:11px; font-weight:600; color:var(--dim); }
 .acc-body{ padding:2px 0 10px; }
 .acc-body[hidden]{ display:none; }
+
+/* --- Fase 4.1: selector de carpeta matriz --- */
+.carpeta-item{
+  display:flex; align-items:center; gap:10px; width:100%; text-align:left;
+  padding:11px 6px; background:none; border:none; border-bottom:1px solid var(--line-soft);
+  color:inherit; font-family:inherit; font-size:13.5px; cursor:pointer;
+}
+.carpeta-item:disabled{ opacity:.4 }
+.carpeta-nom{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }

@@ -71,12 +71,7 @@ async function api(path, opts = {}){
   return r.json();
 }
 
-export async function asegurarCarpeta(nombre, padreId = null){
-  const filtroPadre = padreId ? ` and '${padreId}' in parents` : '';
-  const q = encodeURIComponent(
-    `name='${nombre.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${filtroPadre}`);
-  const res = await api(`files?q=${q}&fields=files(id,name)&pageSize=10`);
-  if (res.files.length) return res.files[0].id;
+export async function crearCarpeta(nombre, padreId = null){
   const creada = await api('files?fields=id', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -84,6 +79,23 @@ export async function asegurarCarpeta(nombre, padreId = null){
                            ...(padreId ? { parents: [padreId] } : {}) })
   });
   return creada.id;
+}
+
+export async function asegurarCarpeta(nombre, padreId = null){
+  const filtroPadre = padreId ? ` and '${padreId}' in parents` : '';
+  const q = encodeURIComponent(
+    `name='${nombre.replace(/\\/g, '\\\\').replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false${filtroPadre}`);
+  const res = await api(`files?q=${q}&fields=files(id,name)&pageSize=10`);
+  if (res.files.length) return res.files[0].id;
+  return crearCarpeta(nombre, padreId);
+}
+
+// Carpetas compartidas conmigo (nivel raiz de "Compartidos") — para vincular la carpeta
+// matriz de una empresa cuyo Drive es de otra persona.
+export async function carpetasCompartidas(){
+  const q = encodeURIComponent(`sharedWithMe = true and mimeType='application/vnd.google-apps.folder' and trashed=false`);
+  const res = await api(`files?q=${q}&fields=files(id,name)&pageSize=1000`);
+  return res.files;
 }
 
 export async function buscarCarpeta(nombre, padreId = null){

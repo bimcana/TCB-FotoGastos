@@ -546,11 +546,90 @@ buclDeteccion();
 
 // Ajustes persistentes (Task 7)
 const inpClient = document.getElementById('inp-clientid');
-const inpCarpeta = document.getElementById('inp-carpeta');
 inpClient.value = get('clientId', '');
-inpCarpeta.value = get('carpetaRaiz', 'Gastos_NCF');
 inpClient.addEventListener('change', () => set('clientId', inpClient.value.trim()));
-inpCarpeta.addEventListener('change', () => { set('carpetaRaiz', inpCarpeta.value.trim() || 'Gastos_NCF'); set('carpetaRaizId', null); });
+
+// ---------- Selector de carpeta matriz (estilo "Guardar en Drive") ----------
+// Navega Mi unidad / Compartidos conmigo y vincula una carpeta EXISTENTE (o nueva).
+// El vinculo se guarda por ID: renombrar/mover la carpeta o reconectar NO lo rompe.
+function pintarRutaCarpeta(){
+  document.getElementById('carpeta-ruta').textContent = get('carpetaRuta', '') || '— sin vincular —';
+}
+pintarRutaCarpeta();
+
+let pickerPila = []; // breadcrumb [{id, nombre}]; vacio = nivel superior virtual
+const PICKER_VIRTUALES = new Set(['root', '__compartidos__']);
+
+async function renderPicker(){
+  const lista = document.getElementById('carpeta-lista');
+  const rutaEl = document.getElementById('carpeta-ruta-actual');
+  const tope = pickerPila[pickerPila.length - 1] || null;
+  rutaEl.textContent = pickerPila.length ? pickerPila.map(p => p.nombre).join(' / ') : 'Elige dónde vive tu carpeta de gastos';
+  const virtual = !tope || PICKER_VIRTUALES.has(tope.id);
+  document.getElementById('carpeta-usar').disabled = virtual;
+  document.getElementById('carpeta-nueva').disabled = !tope || tope.id === '__compartidos__';
+  lista.innerHTML = '<div class="gem-note">Cargando…</div>';
+  try {
+    let carpetas;
+    if (!tope){
+      carpetas = [{ id: 'root', nombre: 'Mi unidad' }, { id: '__compartidos__', nombre: 'Compartidos conmigo' }];
+    } else if (tope.id === '__compartidos__'){
+      carpetas = (await carpetasCompartidas()).map(c => ({ id: c.id, nombre: c.name }));
+    } else {
+      carpetas = (await listarCarpetas(tope.id)).map(c => ({ id: c.id, nombre: c.name }))
+        .sort((a, b) => a.nombre.localeCompare(b.nombre));
+    }
+    lista.innerHTML = '';
+    if (pickerPila.length){
+      const up = document.createElement('button');
+      up.className = 'carpeta-item';
+      up.textContent = '‹ Atrás';
+      up.addEventListener('click', () => { pickerPila.pop(); renderPicker(); });
+      lista.appendChild(up);
+    }
+    for (const c of carpetas){
+      const b = document.createElement('button');
+      b.className = 'carpeta-item';
+      b.innerHTML = '<span>📁</span><span class="carpeta-nom num"></span><span style="color:var(--dim)">›</span>';
+      b.querySelector('.carpeta-nom').textContent = c.nombre;
+      b.addEventListener('click', () => { pickerPila.push(c); renderPicker(); });
+      lista.appendChild(b);
+    }
+    if (!carpetas.length) lista.insertAdjacentHTML('beforeend', '<div class="gem-note">Sin subcarpetas aquí.</div>');
+  } catch(e){ console.error(e); lista.innerHTML = '<div class="gem-note">No se pudo listar — revisa la conexión.</div>'; }
+}
+
+document.getElementById('btn-carpeta').addEventListener('click', () => {
+  if (!conectado()) return toast('Conecta Google Drive primero');
+  pickerPila = [];
+  document.getElementById('carpeta-panel').hidden = false;
+  renderPicker();
+});
+document.getElementById('carpeta-cerrar').addEventListener('click', () => {
+  document.getElementById('carpeta-panel').hidden = true;
+});
+document.getElementById('carpeta-nueva').addEventListener('click', async () => {
+  const tope = pickerPila[pickerPila.length - 1];
+  if (!tope || tope.id === '__compartidos__') return;
+  const nombre = (prompt('Nombre de la carpeta nueva:') || '').trim();
+  if (!nombre) return;
+  try {
+    const id = await crearCarpeta(nombre, tope.id === 'root' ? null : tope.id);
+    pickerPila.push({ id, nombre });
+    renderPicker();
+  } catch(e){ console.error(e); toast('No se pudo crear la carpeta'); }
+});
+document.getElementById('carpeta-usar').addEventListener('click', () => {
+  const tope = pickerPila[pickerPila.length - 1];
+  if (!tope || PICKER_VIRTUALES.has(tope.id)) return;
+  set('carpetaRaizId', tope.id);
+  set('carpetaRaiz', tope.nombre);
+  set('carpetaRuta', pickerPila.map(p => p.nombre).join(' / '));
+  document.getElementById('carpeta-panel').hidden = true;
+  pintarRutaCarpeta();
+  toast(`Carpeta «${tope.nombre}» vinculada ✓`);
+  refrescarGastos(); procesarCola(); revisarPendientes();
+});
 
 // Perfil de empresa (membrete del documento de gastos) — Fase 3.
 import { empresaGuardada, guardarEmpresaLocal, empresaCompleta, archivoALogoB64 } from './empresa.js';
@@ -644,7 +723,8 @@ modeloEl.addEventListener('click', (ev) => {
 // Conexión a Google Drive (Task 9)
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
          buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
-         listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion } from './drive.js';
+         listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion,
+         carpetasCompartidas, crearCarpeta } from './drive.js';
 import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
 import { filas606, generarXLSX606 } from './f606.js';
 
@@ -656,9 +736,20 @@ function clientIdActivo(){
 }
 
 // Pasos comunes tras conectar (boton de Ajustes, aviso tocable o reconexion silenciosa).
+// La carpeta matriz se re-vincula por ID (duradero); si nunca se eligio una, se crea la
+// carpeta por defecto en Mi unidad. Elegir otra: Ajustes → «Elegir carpeta…».
 async function postConexion(){
-  const raizId = await asegurarCarpeta(get('carpetaRaiz', 'Gastos_NCF'));
+  let raizId = get('carpetaRaizId');
+  if (raizId){
+    try { await nombreDe(raizId); } // ¿sigue existiendo y accesible?
+    catch(e){ console.warn('Carpeta vinculada inaccesible; se re-crea la por defecto'); raizId = null; }
+  }
+  if (!raizId){
+    raizId = await asegurarCarpeta(get('carpetaRaiz', 'Gastos_NCF'));
+    set('carpetaRuta', 'Mi unidad / ' + get('carpetaRaiz', 'Gastos_NCF'));
+  }
   set('carpetaRaizId', raizId);
+  pintarRutaCarpeta();
   set('driveConectadoAntes', true); // habilita la reconexion silenciosa al abrir
   // Hereda el membrete guardado en la nube si esta instalacion no lo tiene aun.
   if (!empresaCompleta(empresaGuardada())){

@@ -125,8 +125,9 @@
         </div>
         <div class="card">
           <div class="eyebrow" style="margin-bottom:4px">Google Drive</div>
-          <label class="eyebrow" for="inp-carpeta" style="display:block; margin-top:10px">Nombre de la carpeta raíz</label>
-          <input class="keyfield" id="inp-carpeta" placeholder="Gastos_NCF">
+          <label class="eyebrow" style="display:block; margin-top:10px">Carpeta de gastos vinculada</label>
+          <div class="gem-note num" id="carpeta-ruta" style="margin-top:4px">— sin vincular —</div>
+          <button class="btn btn-ghost btn-sm" id="btn-carpeta" style="margin-top:8px; width:100%">Elegir carpeta…</button>
           <button class="btn btn-primary" id="btn-conectar" style="margin-top:12px">Conectar Google Drive</button>
           <div class="gem-note" id="drive-estado" style="margin-top:8px">No conectado.</div>
         </div>
@@ -176,6 +177,21 @@
         </div>
       </div>
     </section>
+  </div>
+
+  <div class="revisar-panel" id="carpeta-panel" hidden>
+    <div class="revisar-card">
+      <div class="revisar-head">
+        <b>Elegir carpeta de gastos</b>
+        <button class="revisar-x" id="carpeta-cerrar" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="gem-note num" id="carpeta-ruta-actual" style="margin-bottom:6px"></div>
+      <div id="carpeta-lista" style="max-height:45vh; overflow:auto"></div>
+      <div style="display:flex; gap:8px; margin-top:12px">
+        <button class="btn btn-ghost btn-sm" id="carpeta-nueva" style="flex:1">Nueva carpeta</button>
+        <button class="btn btn-primary btn-sm" id="carpeta-usar" style="flex:1">Usar esta carpeta</button>
+      </div>
+    </div>
   </div>
 
   <div class="revisar-panel" id="cola-panel" hidden>
