@@ -92,9 +92,16 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
 - **Lote/galería**: `importarLote` → por imagen: detección 1200px → IA → editor SIEMPRE.
 - **Ajena ("Sin procesar")**: `procesarAjena` → mismo pipeline → al confirmar, original a
   papelera (`__origenAjeno`, se limpia en shutter/lote/cancelar — no quitar esa limpieza).
-- **Revisor background**: `revisarPendientes` (tras subir, al conectar, al abrir Gastos) →
-  `actualizarEntradaConReArchivo` (renombra Pendiente_→Compra_ al saber la fecha, mueve de
-  mes si cambió, actualiza description; devuelve `{nombreFinal, estado, movidaA, entrada}`).
+- **Revisor background: ELIMINADO (decisión de Ari 2026-07-21, protección de cuota).**
+  La IA corre SOLO al capturar/importar foto nueva (`leerDatosDeFactura`) y al presionar
+  «Leer con IA» (`leerConIAAhora`). NO re-agregar disparadores automáticos de Gemini.
+  `actualizarEntradaConReArchivo` sigue siendo el único camino de escritura de metadatos
+  (renombra Pendiente_→Compra_ al saber la fecha, mueve de mes, actualiza description;
+  devuelve `{nombreFinal, estado, movidaA, entrada}`). La cola `fotogastos-rev` se conserva
+  como almacén del blob que «Leer con IA» reutiliza.
+- **Token de Drive**: vive 60 min (límite de Google sin backend). Renovación: al cargar
+  (silenciosa; iOS puede bloquearla sin gesto) y en el PRIMER `pointerdown` del usuario
+  (throttle 30 s) — no quitar ese listener: es lo que evita el "No conectada" tras 1 h.
 - **Panel de edición**: `abrirRevisar`/`rellenarPanel`; botones Leer con IA / Reintentar OCR
   (`leerConIAAhora('auto'|'ocr')`) / Ver imagen / Eliminar / Confirmar. Campos con corrección
   tipo Excel (`normalizarCampoEntrada`).

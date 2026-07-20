@@ -662,7 +662,7 @@ document.getElementById('carpeta-usar').addEventListener('click', () => {
   document.getElementById('carpeta-panel').hidden = true;
   pintarRutaCarpeta();
   toast(`Carpeta «${tope.nombre}» vinculada ✓`);
-  refrescarGastos(); procesarCola(); revisarPendientes();
+  refrescarGastos(); procesarCola();
 });
 
 // Perfil de empresa (membrete del documento de gastos) — Fase 3.
@@ -810,7 +810,6 @@ async function postConexion(){
   sub.classList.remove('accion');
   refrescarGastos();
   procesarCola();
-  revisarPendientes(); // re-lee con Gemini las facturas pendientes al conectar
 }
 
 document.getElementById('btn-conectar').addEventListener('click', async () => {
@@ -876,6 +875,21 @@ async function reconectarSilencioso(){
 }
 window.addEventListener('load', () => setTimeout(reconectarSilencioso, 600));
 
+// El token de Google vive 60 min (limite fijo de Google para apps sin servidor). La
+// renovacion silenciosa al abrir FALLA en iOS si no hay gesto del usuario (bloqueo de
+// popups). Solucion: el PRIMER toque en cualquier parte renueva el token — como el
+// consentimiento ya existe, es instantaneo. Throttle de 30 s para no insistir si Google
+// de verdad exige interaccion.
+let _ultimoIntentoRenovar = 0;
+document.addEventListener('pointerdown', () => {
+  if (conectado()) return;
+  if (!get('driveConectadoAntes', false) || !clientIdActivo() || !window.google) return;
+  const ahora = Date.now();
+  if (ahora - _ultimoIntentoRenovar < 30000) return;
+  _ultimoIntentoRenovar = ahora;
+  reconectarSilencioso();
+}, true);
+
 // Confirmar y subir + pantalla Gastos (Task 10)
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
          nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo } from './naming.js';
@@ -887,25 +901,8 @@ import { encolar, pendientes, eliminar, cuenta } from './queue.js';
 // la fecha del dispositivo), registra metadatos y marca duplicados sin bloquear la subida.
 import { agregarEntrada, entradaDeFactura, quitarEntrada, descDeEntrada, conciliarIndice } from './indice.js';
 
-// Archivos que el revisor esta leyendo AHORA (para el chip "Leyendo con IA…" en Gastos
-// y para rellenar el panel abierto al terminar).
-const archivosEnLectura = new Set();
-
 function refrescarGastosSiVisible(){
   if (document.getElementById('scr-gastos').classList.contains('active')) refrescarGastos();
-}
-
-function alTerminarLectura(archivoAnterior, res){
-  archivosEnLectura.delete(archivoAnterior);
-  refrescarGastosSiVisible();
-  if (!res) return;
-  // Si el usuario tiene abierto el panel de ESTA factura (aunque se haya renombrado),
-  // se rellena ante sus ojos; la confirmacion sigue siendo suya.
-  if (rvArchivo && (rvArchivo === archivoAnterior || rvArchivo === res.nombreFinal)){
-    rvArchivo = res.nombreFinal;
-    rellenarPanel(res.entrada);
-    toast('Datos leídos — revisa y confirma');
-  }
 }
 
 // Mutex que serializa TODAS las escrituras a _gastos.json (subida, revisor con Gemini y
@@ -1036,7 +1033,6 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
       catch(e){ console.error(e); toast('El original sigue en la carpeta — puedes reintentarlo luego'); }
       window.__origenAjeno = null;
     }
-    revisarPendientes(); // el revisor arranca de una vez, sin esperar a que abras Gastos
     avanzarLoteOIr('gastos');
   } catch(e){
     console.error(e);
@@ -1131,69 +1127,16 @@ async function procesarCola(){
   } finally {
     colaEnProceso = false;
     actualizarBadge();
-    revisarPendientes(); // lo recien subido de la cola puede haber quedado por revisar
   }
 }
 window.addEventListener('online', procesarCola);
 actualizarBadge();
 
-// Revisor con Gemini: al abrir la app con conexión + API key, re-lee las facturas de la
-// cola de revisión (incompletas o de OCR local), rellena con Gemini y las deja "pendiente"
-// (a la espera de que el usuario confirme). Una PWA no corre esto con la app cerrada.
-let revisando = false;
-async function revisarPendientes(){
-  if (revisando || !conectado()) return;
-  const key = get('geminiKey', '');
-  if (!key) return;
-  revisando = true; // síncrono, antes de cualquier await: evita dos corridas en paralelo
-  try {
-    const items = await pendientesRevision();
-    for (const item of items){
-      let canvas;
-      try { canvas = await archivoACanvas(item.blob); }
-      catch(e){ // imagen ilegible: no dejar que bloquee la cola; descartar tras 3 intentos
-        console.error(e);
-        const intentos = (item.intentos || 0) + 1;
-        await eliminarRevision(item.id);
-        if (intentos < 3) await encolarRevision({ blob: item.blob, mesId: item.mesId, archivo: item.archivo, intentos });
-        continue;
-      }
-      archivosEnLectura.add(item.archivo); // chip "Leyendo con IA…" en Gastos
-      refrescarGastosSiVisible();
-      let datos = null;
-      try { datos = await extraerDatos(canvas, key, geminiModelo); }
-      catch(e){ // error de red/HTTP con Gemini: reintentar todo luego
-        archivosEnLectura.delete(item.archivo);
-        refrescarGastosSiVisible();
-        console.error(e);
-        break;
-      }
-      try {
-        // read-modify-write atómico contra el índice VIGENTE en Drive; si Gemini fijó la
-        // fecha, el helper renombra/mueve el archivo (Pendiente_… → Compra_DDN en su mes).
-        const res = await actualizarEntradaConReArchivo(item.mesId, item.archivo, f => {
-          if (datos){
-            for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'itbis', 'total']){
-              if (datos[c] != null && datos[c] !== '') f[c] = datos[c];
-            }
-          }
-          f.revisadaIA = true;
-          f.estado = facturaCompleta(f) ? 'pendiente' : 'incompleta'; // el usuario confirma después
-        });
-        await eliminarRevision(item.id);
-        alTerminarLectura(item.archivo, res);
-      } catch(e){
-        archivosEnLectura.delete(item.archivo);
-        console.error(e);
-        break; // fallo de Drive: reintentar en la próxima corrida
-      }
-    }
-  } finally {
-    revisando = false;
-    if (document.getElementById('scr-gastos').classList.contains('active')) refrescarGastos();
-  }
-}
-window.addEventListener('online', revisarPendientes);
+// DECISION DE ARI (2026-07-21): el revisor con Gemini en BACKGROUND se elimino para
+// proteger la cuota gratis (llamaba a la IA por cada pendiente en cada apertura/conexion
+// y reintentaba fallidas). La IA solo corre: (a) al capturar/importar una foto nueva
+// (leerDatosDeFactura) y (b) al presionar "Leer con IA" en el panel (leerConIAAhora).
+// La cola fotogastos-rev se conserva como almacen del blob para ese boton.
 
 // ---------- Gastos por niveles de carpeta (Fase 4) ----------
 // Acordeon de la carpeta matriz: secciones de mes (desc, actual expandido), otras
@@ -1224,11 +1167,7 @@ function filaFactura(ctx, e, nombre){
   }
   const chip = document.createElement('span');
   chip.style.cssText = 'margin-top:4px; font-size:10px; padding:2px 8px';
-  if (archivosEnLectura.has(nombre)){
-    chip.className = 'chip info leyendo';
-    chip.innerHTML = '<span class="dot"></span>Leyendo con IA…';
-    amt.appendChild(chip);
-  } else if (!e){
+  if (!e){
     chip.className = 'chip warn';
     chip.innerHTML = '<span class="dot"></span>Sin procesar';
     amt.appendChild(chip);
@@ -1381,7 +1320,7 @@ async function refrescarGastos(){
     if (!secciones.length) arbol.innerHTML = '<div class="gem-note">Aún no hay facturas en la carpeta.</div>';
   } catch(e){ console.error(e); }
 }
-document.getElementById('tab-gastos').addEventListener('click', () => { refrescarGastos(); revisarPendientes(); });
+document.getElementById('tab-gastos').addEventListener('click', () => { refrescarGastos(); });
 
 // ---------- Generar documento de Gastos (Fase 3) ----------
 // Ticket largo → 2 columnas con los recortes de la plantilla (sup 0–48%, inf 50–100%).
