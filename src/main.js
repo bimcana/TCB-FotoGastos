@@ -37,7 +37,7 @@ import { procesar, aplicarRealce, canvasAJpeg } from './process.js';
 import { get, set } from './settings.js';
 import { extraerDatos, diagnosticoGemini, probarApiKey } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
-import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta } from './validacion.js';
+import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta, normalizarMontoTexto } from './validacion.js';
 import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
 
 // Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
@@ -69,19 +69,34 @@ const ETIQUETA_MODELO = {
 const video = document.getElementById('cam-video');
 const statusTxt = document.getElementById('cam-status-txt');
 
-iniciarCamara(video)
-  .then(() => { statusTxt.textContent = 'Buscando documento…'; })
-  .catch(err => {
-    statusTxt.textContent = 'Sin acceso a la cámara';
-    toast('Permite el acceso a la cámara para capturar facturas');
-    console.error(err);
-  });
+// Ajuste "Cámara": con camaraAuto=false la cámara NO se enciende (ni dispara el aviso
+// de permiso de iOS) hasta que el usuario la pida tocando el estado en pantalla.
+// El aviso en sí es del sistema: la web no puede suprimirlo, solo pedir menos veces.
+function arrancarCamara(){
+  statusTxt.textContent = 'Iniciando cámara…';
+  iniciarCamara(video)
+    .then(() => { statusTxt.textContent = 'Buscando documento…'; })
+    .catch(err => {
+      statusTxt.textContent = 'Sin acceso a la cámara';
+      toast('Permite el acceso a la cámara para capturar facturas');
+      console.error(err);
+    });
+}
+if (get('camaraAuto', true)){
+  arrancarCamara();
+} else {
+  statusTxt.textContent = 'Toca aquí para activar la cámara';
+}
+document.getElementById('cam-status').addEventListener('click', () => {
+  const track = video.srcObject && video.srcObject.getVideoTracks()[0];
+  if (!track || track.readyState === 'ended') arrancarCamara();
+});
 
 // Recuperar cámara al volver de background (iOS suele terminar el track).
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   const track = video.srcObject && video.srcObject.getVideoTracks()[0];
-  if (!track || track.readyState === 'ended'){
+  if ((!track || track.readyState === 'ended') && get('camaraAuto', true)){
     iniciarCamara(video).catch(err => {
       statusTxt.textContent = 'Sin acceso a la cámara';
       console.error(err);
@@ -165,7 +180,7 @@ function normalizarEnCampos(datos){
 }
 
 function leerCampos(){
-  const num = v => { const n = parseFloat(String(v).trim().replace(',', '.')); return Number.isFinite(n) ? n : null; };
+  const num = v => normalizarMontoTexto(v);
   return {
     fechaEmision: document.getElementById('c-fecha').value.trim(),
     ncf: document.getElementById('c-ncf').value.trim(),
@@ -245,10 +260,10 @@ async function leerDatosDeFactura(){
         const diag = diagnosticoGemini(e.status);
         if (diag) toast(diag);
         origen.textContent = 'Leyendo (OCR local)…';
-        datos = await extraerDatosLocal(canvas); motor = 'local';
+        datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motor = 'local';
       } finally { abortLectura = null; }
     } else {
-      datos = await extraerDatosLocal(canvas); motor = 'local';
+      datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motor = 'local';
     }
   } catch(e){ console.error(e); toast('No se pudo leer la factura; escribe los datos'); datos = null; motor = 'manual'; }
   if (miGen !== genOCR) return; // llegó una lectura más nueva; ella controla los campos
@@ -293,7 +308,26 @@ async function validarCampos(gen){
   document.getElementById('valid-row').innerHTML = chips.join('');
 }
 
-CAMPOS_IDS.forEach(id => document.getElementById(id).addEventListener('change', () => validarCampos()));
+// Correccion tipo Excel: el campo entiende lo que el usuario quiso escribir con el
+// teclado numerico y lo lleva al formato de la celda. Fechas: 17072026, 17/07/26,
+// 17.07.2026, 17/jul/2026 → AAAA-MM-DD. Montos: 3,620.00, 3.620,00, 45,5 → 3620.00.
+function normalizarCampoEntrada(id){
+  const el = document.getElementById(id);
+  const v = el.value.trim();
+  if (!v) return;
+  if (/fecha/.test(id)){
+    const f = normalizarFecha(v);
+    if (f) el.value = f;
+  } else if (/subtotal|itbis|total/.test(id)){
+    const n = normalizarMontoTexto(v);
+    if (n != null) el.value = n.toFixed(2);
+  }
+}
+
+CAMPOS_IDS.forEach(id => document.getElementById(id).addEventListener('change', () => {
+  normalizarCampoEntrada(id);
+  validarCampos();
+}));
 
 async function reprocesarRealce(){
   const res = window.__resultado;
@@ -684,6 +718,17 @@ document.getElementById('btn-otros').addEventListener('click', () => {
   if (pin !== pinGuardado) return toast('PIN incorrecto');
   otrosPanel.hidden = false;
 });
+
+// Toggle "Cámara al abrir" (tcb:camaraAuto). "Solo al tocar" evita pedir la cámara (y su
+// aviso de permiso de iOS) en cada apertura cuando el usuario solo viene a Gastos/Ajustes.
+function actualizarUICamaraAuto(){
+  const auto = get('camaraAuto', true);
+  document.getElementById('cam-auto-si').classList.toggle('on', auto);
+  document.getElementById('cam-auto-no').classList.toggle('on', !auto);
+}
+document.getElementById('cam-auto-si').addEventListener('click', () => { set('camaraAuto', true); actualizarUICamaraAuto(); });
+document.getElementById('cam-auto-no').addEventListener('click', () => { set('camaraAuto', false); actualizarUICamaraAuto(); toast('La cámara solo se encenderá cuando la toques'); });
+actualizarUICamaraAuto();
 
 const inpGemini = document.getElementById('inp-gemini');
 inpGemini.value = get('geminiKey', '');
@@ -1199,9 +1244,44 @@ function filaFactura(ctx, e, nombre){
   } else {
     inv.addEventListener('click', () => procesarAjena(ctx, nombre));
   }
+  // Mantener presionado (600 ms) = eliminar, SOLO para filas con etiqueta de alerta
+  // (sin procesar, pendiente, incompleta, duplicada). Las completas son registro fiscal.
+  if (!e || e.estado !== 'completa' || e.duplicada){
+    let timer = null;
+    const armar = () => { timer = setTimeout(() => { timer = null; eliminarFactura(ctx, e, nombre); }, 600); };
+    const soltar = () => { if (timer){ clearTimeout(timer); timer = null; } };
+    inv.addEventListener('pointerdown', armar);
+    inv.addEventListener('pointerup', soltar);
+    inv.addEventListener('pointermove', soltar);
+    inv.addEventListener('pointercancel', soltar);
+    inv.addEventListener('contextmenu', ev => ev.preventDefault()); // iOS long-press
+  }
   inv.appendChild(thumb); inv.appendChild(info);
   if (amt.childNodes.length) inv.appendChild(amt);
   return inv;
+}
+
+// Elimina una factura no-completa: archivo a la papelera de Drive (recuperable 30 dias),
+// fuera del indice (bajo el mutex) y de la cola local de revision si estaba ahi.
+async function eliminarFactura(ctx, e, nombre){
+  const etiqueta = e ? (e.duplicada ? 'duplicada' : e.estado) : 'sin procesar';
+  if (!confirm(`¿Eliminar «${nombre}» (${etiqueta})? La imagen irá a la papelera de Drive.`)) return;
+  try {
+    const fileId = (e && e.driveId) || ctx.idPorNombre?.get(nombre) || await buscarArchivo(ctx.mesId, nombre);
+    if (fileId) await moverAPapelera(fileId);
+    if (e){
+      await conLockIndice(async () => {
+        const idx = await leerJSON(ctx.mesId, '_gastos.json');
+        if (idx) await guardarJSON(ctx.mesId, '_gastos.json', quitarEntrada(idx, nombre));
+      });
+      try {
+        const item = (await pendientesRevision()).find(x => x.archivo === nombre);
+        if (item) await eliminarRevision(item.id);
+      } catch(err){ console.error(err); }
+    }
+    toast(`«${nombre}» eliminada — recuperable en la papelera de Drive`);
+    refrescarGastos();
+  } catch(err){ console.error(err); toast('No se pudo eliminar: ' + err.message); }
 }
 
 async function renderSeccion(carpeta, bodyEl, metaEl){
@@ -1398,6 +1478,10 @@ async function procesarAjena(ctx, nombre){
 const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-itbis':'itbis','rv-total':'total' };
 let rvArchivo = null;
 
+// El panel de revision corrige la entrada igual que la tarjeta de captura (tipo Excel).
+Object.keys(RV_CAMPOS).forEach(id =>
+  document.getElementById(id).addEventListener('change', () => normalizarCampoEntrada(id)));
+
 // Miniaturas del panel de revision: cache por sesion para no re-descargar de Drive.
 const thumbCache = new Map(); // archivo → Blob
 let rvThumbURL = null;
@@ -1439,7 +1523,10 @@ function abrirRevisar(archivo){
   if (!f) return;
   rvArchivo = archivo;
   rellenarPanel(f);
-  document.getElementById('rv-leer').hidden = f.estado === 'completa';
+  const esCompleta = f.estado === 'completa';
+  document.getElementById('rv-leer').hidden = esCompleta;
+  document.getElementById('rv-ocr').hidden = esCompleta;
+  document.getElementById('rv-eliminar').hidden = esCompleta && !f.duplicada; // completas: registro fiscal
   document.getElementById('revisar-panel').hidden = false;
   cargarMiniatura(window.__gastosMes.mesId, archivo);
 }
@@ -1454,7 +1541,7 @@ async function confirmarRevision(){
   const ctx = window.__gastosMes;
   if (!ctx || !rvArchivo) return;
   const archivo = rvArchivo;
-  const num = v => { const n = parseFloat(String(v).trim().replace(',', '.')); return Number.isFinite(n) ? n : null; };
+  const num = v => normalizarMontoTexto(v);
   const edits = {};
   for (const [id, campo] of Object.entries(RV_CAMPOS)){
     const v = document.getElementById(id).value.trim();
@@ -1497,13 +1584,15 @@ async function verImagenRevision(){
   } catch(e){ console.error(e); toast('No se pudo cargar la imagen'); }
 }
 
-// Reintento manual (idea de Ari): lee ESTA factura al momento — Gemini si hay key y
-// conexion, OCR local si no — y deja el resultado 'pendiente' para que el usuario valide.
-async function leerConIAAhora(){
+// Reintento manual (idea de Ari): lee ESTA factura al momento y deja el resultado
+// 'pendiente' para que el usuario valide. motor 'auto' = Gemini con respaldo OCR;
+// motor 'ocr' = directo al OCR local (boton "Reintentar OCR").
+async function leerConIAAhora(motor = 'auto'){
   const ctx = window.__gastosMes;
   if (!ctx || !rvArchivo) return;
   const archivo = rvArchivo;
-  const btn = document.getElementById('rv-leer');
+  const btn = document.getElementById(motor === 'ocr' ? 'rv-ocr' : 'rv-leer');
+  const rotulo = btn.textContent;
   btn.disabled = true; btn.textContent = 'Leyendo…';
   try {
     const item = (await pendientesRevision()).find(x => x.archivo === archivo);
@@ -1515,9 +1604,9 @@ async function leerConIAAhora(){
     if (!blob) return toast('No se encontró la imagen de la factura');
     const canvas = await archivoACanvas(blob);
     const key = get('geminiKey', '');
-    let datos = null, motor = null;
-    if (key){
-      try { datos = await extraerDatos(canvas, key, geminiModelo); motor = 'gemini'; }
+    let datos = null, motorUsado = null;
+    if (key && motor !== 'ocr'){
+      try { datos = await extraerDatos(canvas, key, geminiModelo); motorUsado = 'gemini'; }
       catch(e){
         console.error(e);
         const diag = diagnosticoGemini(e.status);
@@ -1525,7 +1614,7 @@ async function leerConIAAhora(){
       }
     }
     if (!datos){
-      try { datos = await extraerDatosLocal(canvas); motor = 'local'; }
+      try { datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motorUsado = 'local'; }
       catch(e){ console.error(e); }
     }
     if (!datos) return toast('Sin conexión y sin OCR disponible — intenta luego');
@@ -1533,7 +1622,7 @@ async function leerConIAAhora(){
       for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'itbis', 'total']){
         if (datos[c] != null && datos[c] !== '') f[c] = datos[c];
       }
-      if (motor === 'gemini') f.revisadaIA = true;
+      if (motorUsado === 'gemini') f.revisadaIA = true;
       f.estado = facturaCompleta(f) ? 'pendiente' : 'incompleta';
     });
     if (!res) return toast('La factura ya no está en el índice');
@@ -1541,11 +1630,20 @@ async function leerConIAAhora(){
     rvArchivo = res.nombreFinal;
     rellenarPanel(res.entrada);
     refrescarGastos();
-    toast('Datos leídos — revisa y confirma');
+    toast(motorUsado === 'local' ? 'Datos leídos con OCR — revisa bien y confirma' : 'Datos leídos — revisa y confirma');
   } catch(e){ console.error(e); toast('No se pudo leer: ' + e.message); }
-  finally { btn.disabled = false; btn.textContent = 'Leer con IA'; }
+  finally { btn.disabled = false; btn.textContent = rotulo; }
 }
-document.getElementById('rv-leer').addEventListener('click', leerConIAAhora);
+document.getElementById('rv-leer').addEventListener('click', () => leerConIAAhora('auto'));
+document.getElementById('rv-ocr').addEventListener('click', () => leerConIAAhora('ocr'));
+document.getElementById('rv-eliminar').addEventListener('click', async () => {
+  const ctx = window.__gastosMes;
+  if (!ctx || !rvArchivo) return;
+  const f = ctx.idx?.facturas?.find(x => x.archivo === rvArchivo) || null;
+  const archivo = rvArchivo;
+  cerrarRevisar();
+  await eliminarFactura(ctx, f, archivo);
+});
 
 document.getElementById('revisar-cerrar').addEventListener('click', cerrarRevisar);
 document.getElementById('rv-confirmar').addEventListener('click', confirmarRevision);

@@ -69,3 +69,43 @@ test('texto sin datos reconocibles → todos null', () => {
   assert.equal(d.itbis, null);
   assert.equal(d.total, null);
 });
+
+// --- Fase 5: casos reales de campo (voucher Cardnet/Shell del 2026-07-17) ---
+const VOUCHER = `CARDNET
+JOSE FRANCISCO FARIAS ADAMES
+012-0015611-3
+SHELL EST JUAN DE HERRERA
+FECHA:VIE,17/JUL/2026 HORA:06:54:23 PM
+COMPROBANTE FISCAL
+02 Producto Exento 1 RD$1.00
+TOTAL: RD$3, 620.00
+TIPO DE NCF Fiscal
+NCF B0100007577
+RNC 133231824
+NOMBRE BIMCANA
+FECHA DE VENCIMIENTO 31/12/2027`;
+
+test('fecha con dia de semana y mes en letras (VIE,17/JUL/2026)', () => {
+  assert.equal(parsearTextoFactura(VOUCHER).fechaEmision, '2026-07-17');
+});
+
+test('total con miles aunque el OCR meta espacios (RD$3, 620.00 → 3620)', () => {
+  assert.equal(parsearTextoFactura(VOUCHER).total, 3620);
+});
+
+test('rncPropio (el RNC de la empresa del usuario) NO se toma como emisor', () => {
+  const d = parsearTextoFactura(VOUCHER, { rncPropio: '1-33-23182-4' });
+  assert.equal(d.rncEmisor, null); // mejor null que el RNC del cliente
+});
+
+test('ITBIS con variantes de etiqueta del OCR', () => {
+  const t = 'COMERCIO X\nSUBTOTAL 100.00\nI.T.B.I.S. 18.00\nTOTAL 118.00';
+  assert.equal(parsearTextoFactura(t).itbis, 18);
+  const t2 = 'COMERCIO X\nITEBIS 18% 36.00\nTOTAL 236.00';
+  assert.equal(parsearTextoFactura(t2).itbis, 36);
+});
+
+test('monto europeo (3.620,00) y decimal con coma', () => {
+  assert.equal(parsearTextoFactura('X\nTOTAL 3.620,00').total, 3620);
+  assert.equal(parsearTextoFactura('X\nTOTAL 45,50').total, 45.5);
+});
