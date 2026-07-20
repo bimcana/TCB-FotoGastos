@@ -2,9 +2,9 @@
 
 Prototipo de interfaz de **TCB FotoGastos**, una PWA de **TCB — Tax Consulting Business** para que sus empresas clientes fotografíen facturas con comprobante fiscal (NCF, República Dominicana), las organicen automáticamente en la nube y generen el documento mensual de gastos y los datos del Formato 606.
 
-**Prototipo en vivo:** https://ariesteban.github.io/TCB-FotoGastos/
+**Prototipo en vivo:** https://bimcana.github.io/TCB-FotoGastos/
 
-**Maqueta original (referencia):** https://ariesteban.github.io/TCB-FotoGastos/prototipo/
+**Maqueta original (referencia):** https://bimcana.github.io/TCB-FotoGastos/prototipo/
 
 En iPhone: abrir en Safari → Compartir → **Añadir a pantalla de inicio**.
 

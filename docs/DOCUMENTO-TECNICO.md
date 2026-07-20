@@ -13,7 +13,7 @@ Drive (`AAAA-MM_Mes/Compra_DDN.jpg`), y genera el PDF mensual (réplica de la pl
 y el Excel Formato 606. Multi-usuario sobre una carpeta compartida. La versión **Lite**
 (repo hermano `TCB-FotoGastos-Lite`) solo alimenta la carpeta; esta Full procesa.
 
-- Producción: `https://ariesteban.github.io/TCB-FotoGastos/` · repo `ariesteban/TCB-FotoGastos`
+- Producción: `https://bimcana.github.io/TCB-FotoGastos/` · repo `bimcana/TCB-FotoGastos`
 - Ramas: trabajo en `faseN` → merge --no-ff a `main` → `gh-pages` se fuerza a `main` y se empuja.
 
 ## 2. Mapa de módulos (src/)
@@ -111,7 +111,7 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
 - Facturas reales de prueba: `../Facturas de prueba/` (57). Plantilla PDF/PPTX de referencia:
   `../Junio 2025/`.
 - OAuth: Client ID en `config.js` (público); orígenes autorizados incluyen
-  `https://ariesteban.github.io`. App publicada "In production" sin verificación (pantalla
+  `https://bimcana.github.io`. App publicada "In production" sin verificación (pantalla
   "no verificada" 1 vez por usuario; tope 100 usuarios; verificación CASA solo si escala).
 
 ## 7. Backlog conocido
