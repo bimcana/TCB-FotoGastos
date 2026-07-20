@@ -53,7 +53,9 @@ export function parseRespuesta(json){
 function canvasABase64(canvas){
   // Reducir a lado máximo ~1600px acelera la subida y el análisis (sobre todo con conexión
   // inestable) sin perder legibilidad del texto para el modelo. dataURL → solo el base64.
-  const maxLado = 1600;
+  // 1280px: suficiente para leer texto de factura y ~35% menos bytes que 1600 (Gemini
+  // respondia lento en campo; menos subida + menos pixeles = respuesta mas rapida).
+  const maxLado = 1280;
   const escala = Math.min(1, maxLado / Math.max(canvas.width, canvas.height));
   let fuente = canvas;
   if (escala < 1){

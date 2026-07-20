@@ -37,7 +37,7 @@ import { procesar, aplicarRealce, canvasAJpeg } from './process.js';
 import { get, set } from './settings.js';
 import { extraerDatos, diagnosticoGemini, probarApiKey } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
-import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta } from './validacion.js';
+import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta, normalizarMontoTexto } from './validacion.js';
 import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
 
 // Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
@@ -165,7 +165,7 @@ function normalizarEnCampos(datos){
 }
 
 function leerCampos(){
-  const num = v => { const n = parseFloat(String(v).trim().replace(',', '.')); return Number.isFinite(n) ? n : null; };
+  const num = v => normalizarMontoTexto(v);
   return {
     fechaEmision: document.getElementById('c-fecha').value.trim(),
     ncf: document.getElementById('c-ncf').value.trim(),
@@ -245,10 +245,10 @@ async function leerDatosDeFactura(){
         const diag = diagnosticoGemini(e.status);
         if (diag) toast(diag);
         origen.textContent = 'Leyendo (OCR local)…';
-        datos = await extraerDatosLocal(canvas); motor = 'local';
+        datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motor = 'local';
       } finally { abortLectura = null; }
     } else {
-      datos = await extraerDatosLocal(canvas); motor = 'local';
+      datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motor = 'local';
     }
   } catch(e){ console.error(e); toast('No se pudo leer la factura; escribe los datos'); datos = null; motor = 'manual'; }
   if (miGen !== genOCR) return; // llegó una lectura más nueva; ella controla los campos
@@ -293,7 +293,26 @@ async function validarCampos(gen){
   document.getElementById('valid-row').innerHTML = chips.join('');
 }
 
-CAMPOS_IDS.forEach(id => document.getElementById(id).addEventListener('change', () => validarCampos()));
+// Correccion tipo Excel: el campo entiende lo que el usuario quiso escribir con el
+// teclado numerico y lo lleva al formato de la celda. Fechas: 17072026, 17/07/26,
+// 17.07.2026, 17/jul/2026 → AAAA-MM-DD. Montos: 3,620.00, 3.620,00, 45,5 → 3620.00.
+function normalizarCampoEntrada(id){
+  const el = document.getElementById(id);
+  const v = el.value.trim();
+  if (!v) return;
+  if (/fecha/.test(id)){
+    const f = normalizarFecha(v);
+    if (f) el.value = f;
+  } else if (/subtotal|itbis|total/.test(id)){
+    const n = normalizarMontoTexto(v);
+    if (n != null) el.value = n.toFixed(2);
+  }
+}
+
+CAMPOS_IDS.forEach(id => document.getElementById(id).addEventListener('change', () => {
+  normalizarCampoEntrada(id);
+  validarCampos();
+}));
 
 async function reprocesarRealce(){
   const res = window.__resultado;
@@ -1398,6 +1417,10 @@ async function procesarAjena(ctx, nombre){
 const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-itbis':'itbis','rv-total':'total' };
 let rvArchivo = null;
 
+// El panel de revision corrige la entrada igual que la tarjeta de captura (tipo Excel).
+Object.keys(RV_CAMPOS).forEach(id =>
+  document.getElementById(id).addEventListener('change', () => normalizarCampoEntrada(id)));
+
 // Miniaturas del panel de revision: cache por sesion para no re-descargar de Drive.
 const thumbCache = new Map(); // archivo → Blob
 let rvThumbURL = null;
@@ -1454,7 +1477,7 @@ async function confirmarRevision(){
   const ctx = window.__gastosMes;
   if (!ctx || !rvArchivo) return;
   const archivo = rvArchivo;
-  const num = v => { const n = parseFloat(String(v).trim().replace(',', '.')); return Number.isFinite(n) ? n : null; };
+  const num = v => normalizarMontoTexto(v);
   const edits = {};
   for (const [id, campo] of Object.entries(RV_CAMPOS)){
     const v = document.getElementById(id).value.trim();
@@ -1525,7 +1548,7 @@ async function leerConIAAhora(){
       }
     }
     if (!datos){
-      try { datos = await extraerDatosLocal(canvas); motor = 'local'; }
+      try { datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motor = 'local'; }
       catch(e){ console.error(e); }
     }
     if (!datos) return toast('Sin conexión y sin OCR disponible — intenta luego');

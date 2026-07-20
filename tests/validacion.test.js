@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ncfValido, normalizarFecha, montoValido, buscarDuplicado, facturaCompleta, estadoFactura } from '../src/validacion.js';
+import { ncfValido, normalizarFecha, montoValido, buscarDuplicado, facturaCompleta, estadoFactura, normalizarMontoTexto } from '../src/validacion.js';
 
 test('NCF serie B válido', () => { assert.equal(ncfValido('B0100182291'), true); });
 test('NCF serie E válido', () => { assert.equal(ncfValido('E310000083906'), true); });
@@ -55,4 +55,23 @@ test('estadoFactura: completos + origen local → pendiente', () => {
 });
 test('estadoFactura: falta un esencial (total) → incompleta aunque origen sea gemini', () => {
   assert.equal(estadoFactura({ ...DATOS_COMPLETOS, total: null }, 'gemini'), 'incompleta');
+});
+
+// --- Fase 5: entrada tipo Excel (el campo corrige lo que el usuario quiso escribir) ---
+test('normalizarFecha: digitos corridos, mes en letras, punto y año corto', () => {
+  assert.equal(normalizarFecha('17072026'), '2026-07-17');
+  assert.equal(normalizarFecha('17/JUL/2026'), '2026-07-17');
+  assert.equal(normalizarFecha('17.07.2026'), '2026-07-17');
+  assert.equal(normalizarFecha('17/07/26'), '2026-07-17');
+  assert.equal(normalizarFecha('VIE,17/JUL/2026'), '2026-07-17');
+});
+
+test('normalizarMontoTexto: miles, comas decimales, espacios y simbolos', () => {
+  assert.equal(normalizarMontoTexto('RD$3,620.00'), 3620);
+  assert.equal(normalizarMontoTexto('3, 620.00'), 3620);
+  assert.equal(normalizarMontoTexto('3.620,00'), 3620);
+  assert.equal(normalizarMontoTexto('45,50'), 45.5);
+  assert.equal(normalizarMontoTexto('1234'), 1234);
+  assert.equal(normalizarMontoTexto('abc'), null);
+  assert.equal(normalizarMontoTexto(''), null);
 });
