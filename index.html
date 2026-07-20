@@ -114,6 +114,14 @@
           </div>
         </div>
         <div class="card">
+          <div class="eyebrow" style="margin-bottom:8px">Cámara</div>
+          <div class="seg" role="tablist" id="camara-auto-seg">
+            <button class="on" id="cam-auto-si">Iniciar al abrir</button>
+            <button id="cam-auto-no">Solo al tocar</button>
+          </div>
+          <div class="gem-note" style="margin-top:8px">«Solo al tocar»: la cámara no se enciende (ni pide permiso) hasta que toques el botón en la pantalla de Cámara. Nota: el aviso de permiso lo muestra iOS, no la app; iOS lo recuerda mejor cuanto menos se pide.</div>
+        </div>
+        <div class="card">
           <div class="eyebrow" style="margin-bottom:8px">Imagen — modo por defecto</div>
           <div class="filtros" id="filtros-def">
             <button class="filtro on" data-modo="color">Auto-color</button>
@@ -224,8 +232,12 @@
       </div>
       <div style="display:flex; gap:8px; margin-top:12px">
         <button class="btn btn-ghost btn-sm" id="rv-leer" style="flex:1">Leer con IA</button>
+        <button class="btn btn-ghost btn-sm" id="rv-ocr" style="flex:1">Reintentar OCR</button>
         <button class="btn btn-ghost btn-sm" id="rv-ver-imagen" style="flex:1">Ver imagen</button>
-        <button class="btn btn-primary btn-sm" id="rv-confirmar" style="flex:1">Confirmar</button>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:8px">
+        <button class="btn btn-ghost btn-sm" id="rv-eliminar" style="flex:1; color:#E5484D">Eliminar</button>
+        <button class="btn btn-primary btn-sm" id="rv-confirmar" style="flex:2">Confirmar</button>
       </div>
     </div>
   </div>
