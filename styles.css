@@ -580,3 +580,12 @@ html[data-theme="light"] #batch-count{color:#16202B}
 }
 .carpeta-item:disabled{ opacity:.4 }
 .carpeta-nom{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* --- Fase 7: deslizar carpetas en Gastos --- */
+.acc-fila{ position:relative; overflow:hidden; }
+.acc-fila .acc-head{ position:relative; z-index:1; background:var(--panel, transparent); transition:transform .18s ease; touch-action:pan-y; }
+.acc-fila.deslizada .acc-head{ transform:translateX(-158px); }
+.acc-acciones{ position:absolute; top:0; right:0; bottom:0; display:flex; z-index:0; }
+.acc-accion{ width:78px; border:none; color:#fff; font-family:inherit; font-size:12px; font-weight:700; cursor:pointer; }
+.acc-accion.archivar{ background:#3A6EA5; }
+.acc-accion.eliminar{ background:#C0392B; }

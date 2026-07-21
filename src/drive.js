@@ -125,6 +125,13 @@ export async function descargarPorId(fileId){
   return r.blob();
 }
 
+// Mueve un archivo o CARPETA a otro padre sin renombrarlo (usado por «Archivar»).
+export async function moverACarpeta(fileId, nuevoPadreId, viejoPadreId){
+  return api(`files/${fileId}?addParents=${nuevoPadreId}&removeParents=${viejoPadreId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+  });
+}
+
 // A la papelera (recuperable 30 dias) — para el original de una factura ajena procesada.
 export async function moverAPapelera(fileId){
   return api(`files/${fileId}`, {

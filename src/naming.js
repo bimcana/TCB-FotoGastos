@@ -58,6 +58,21 @@ export function mesesDeCarpetas(nombres, hoyISOStr){
   return [...meses].sort();
 }
 
+// --- Fase 7: carpeta de archivo y acciones al deslizar en Gastos ------------
+// Las carpetas archivadas se mueven a «Archivo» dentro de la carpeta matriz: siguen en
+// Drive (nada se borra), pero Gastos deja de mostrarlas.
+export const CARPETA_ARCHIVO = 'Archivo';
+
+// Reglas de Ari: carpeta vacia → archivar o eliminar; carpeta del MES ACTUAL con
+// facturas → intocable; cualquier otra con facturas → solo archivar.
+export function accionesCarpeta({ nombre, vacia, hoyISOStr }){
+  if (nombre === CARPETA_ARCHIVO) return [];
+  if (vacia) return ['archivar', 'eliminar'];
+  const m = String(nombre || '').match(/^(\d{4}-\d{2})_/);
+  if (m && m[1] === String(hoyISOStr || '').slice(0, 7)) return [];
+  return ['archivar'];
+}
+
 export function necesitaReArchivo(nombreArchivo, carpetaActual, fechaISO){
   if (!fechaISO) return false;
   if (esProvisional(nombreArchivo)) return true;

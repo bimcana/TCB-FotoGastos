@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
          nombreProvisional, esProvisional, nombreCoincideConFecha, nombreUnico, necesitaReArchivo,
-         mesesDeCarpetas } from '../src/naming.js';
+         mesesDeCarpetas, accionesCarpeta, CARPETA_ARCHIVO } from '../src/naming.js';
 
 test('mesesDeCarpetas: unicos, ordenados, incluye el mes actual', () => {
   const nombres = ['2025-06_Junio', '2026-07_Julio', '2025-06_Junio', 'Gastos_x.pdf'];
@@ -73,4 +73,14 @@ test('necesitaReArchivo: provisional siempre; mes o dia distinto tambien', () =>
   assert.equal(necesitaReArchivo('Compra_150.jpg', '2026-07_Julio', '2026-07-16'), true);  // otro dia
   assert.equal(necesitaReArchivo('Compra_160.jpg', '2026-07_Julio', '2026-07-16'), false); // coincide
   assert.equal(necesitaReArchivo('Compra_160.jpg', '2026-07_Julio', null), false);          // sin fecha no se mueve
+});
+
+// --- Fase 7: acciones al deslizar una carpeta en Gastos ---
+test('accionesCarpeta: vacia → archivar+eliminar; mes actual → ninguna; anterior → archivar', () => {
+  assert.deepEqual(accionesCarpeta({ nombre: '2026-05_Mayo', vacia: true, hoyISOStr: '2026-07-21' }), ['archivar', 'eliminar']);
+  assert.deepEqual(accionesCarpeta({ nombre: '2026-07_Julio', vacia: true, hoyISOStr: '2026-07-21' }), ['archivar', 'eliminar']);
+  assert.deepEqual(accionesCarpeta({ nombre: '2026-07_Julio', vacia: false, hoyISOStr: '2026-07-21' }), []);
+  assert.deepEqual(accionesCarpeta({ nombre: '2026-05_Mayo', vacia: false, hoyISOStr: '2026-07-21' }), ['archivar']);
+  assert.deepEqual(accionesCarpeta({ nombre: 'Otra carpeta', vacia: false, hoyISOStr: '2026-07-21' }), ['archivar']);
+  assert.deepEqual(accionesCarpeta({ nombre: 'Archivo', vacia: false, hoyISOStr: '2026-07-21' }), []); // nunca se archiva a si misma
 });

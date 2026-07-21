@@ -102,6 +102,17 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
 - **Token de Drive**: vive 60 min (límite de Google sin backend). Renovación: al cargar
   (silenciosa; iOS puede bloquearla sin gesto) y en el PRIMER `pointerdown` del usuario
   (throttle 30 s) — no quitar ese listener: es lo que evita el "No conectada" tras 1 h.
+- **Carpetas en Gastos (Fase 7)**: deslizar el encabezado a la izquierda revela acciones
+  según `accionesCarpeta({nombre, vacia, hoyISOStr})` (naming.js, puro): vacía →
+  `['archivar','eliminar']`; mes ACTUAL con facturas → `[]`; resto → `['archivar']`.
+  Archivar mueve la carpeta a `CARPETA_ARCHIVO` ('Archivo') dentro de la matriz con
+  `moverACarpeta`; esa carpeta se EXCLUYE del árbol de Gastos (solo se ve en Drive).
+  Eliminar (solo vacías) va a papelera. `armarDeslizamiento` distingue toque de
+  deslizamiento con `fila.dataset.deslizando`.
+- **Formato de presentación (Fase 7)**: se GUARDA ISO (`AAAA-MM-DD`) y número; se MUESTRA
+  `DD-MM-AAAA` y `2,500.00` vía `formatearFechaDO`/`formatearMonto` (validacion.js).
+  Al leer, `normalizarFecha`/`normalizarMontoTexto` revierten. NO cambiar el
+  almacenamiento a DD-MM: lo consumen nombres de carpeta, orden y el 606.
 - **Panel de edición**: `abrirRevisar`/`rellenarPanel`; botones Leer con IA / Reintentar OCR
   (`leerConIAAhora('auto'|'ocr')`) / Ver imagen / Eliminar / Confirmar. Campos con corrección
   tipo Excel (`normalizarCampoEntrada`).

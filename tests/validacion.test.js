@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ncfValido, normalizarFecha, montoValido, buscarDuplicado, facturaCompleta, estadoFactura, normalizarMontoTexto } from '../src/validacion.js';
+import { ncfValido, normalizarFecha, montoValido, buscarDuplicado, facturaCompleta, estadoFactura, normalizarMontoTexto, formatearFechaDO, formatearMonto } from '../src/validacion.js';
 
 test('NCF serie B válido', () => { assert.equal(ncfValido('B0100182291'), true); });
 test('NCF serie E válido', () => { assert.equal(ncfValido('E310000083906'), true); });
@@ -74,4 +74,27 @@ test('normalizarMontoTexto: miles, comas decimales, espacios y simbolos', () => 
   assert.equal(normalizarMontoTexto('1234'), 1234);
   assert.equal(normalizarMontoTexto('abc'), null);
   assert.equal(normalizarMontoTexto(''), null);
+});
+
+// --- Fase 7: formato dominicano de presentacion (se guarda ISO, se muestra DD-MM-AAAA) ---
+test('formatearFechaDO: ISO → DD-MM-AAAA; tolera basura', () => {
+  assert.equal(formatearFechaDO('2026-07-17'), '17-07-2026');
+  assert.equal(formatearFechaDO('17-07-2026'), '17-07-2026'); // ya formateada, idempotente
+  assert.equal(formatearFechaDO(''), '');
+  assert.equal(formatearFechaDO(null), '');
+  assert.equal(formatearFechaDO('texto raro'), 'texto raro'); // no destruye lo que el usuario escribio
+});
+
+test('formatearMonto: miles con coma y 2 decimales', () => {
+  assert.equal(formatearMonto(2500), '2,500.00');
+  assert.equal(formatearMonto(3620.5), '3,620.50');
+  assert.equal(formatearMonto(45), '45.00');
+  assert.equal(formatearMonto(1234567.891), '1,234,567.89');
+  assert.equal(formatearMonto(null), '');
+  assert.equal(formatearMonto('abc'), '');
+});
+
+test('ida y vuelta: lo mostrado se vuelve a leer igual', () => {
+  assert.equal(normalizarMontoTexto(formatearMonto(2500)), 2500);
+  assert.equal(normalizarFecha(formatearFechaDO('2026-07-17')), '2026-07-17');
 });

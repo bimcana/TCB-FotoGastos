@@ -51,6 +51,27 @@ export function normalizarMontoTexto(v){
 
 export function montoValido(n){ return typeof n === 'number' && Number.isFinite(n) && n >= 0; }
 
+// --- Presentacion (Fase 7) -------------------------------------------------
+// REGLA: internamente TODO se guarda en ISO (AAAA-MM-DD) porque de ahi salen los nombres
+// de carpeta, el orden y el Formato 606. Estas dos funciones son SOLO para mostrar y
+// escribir en pantalla, al estilo dominicano: fechas DD-MM-AAAA y montos 2,500.00.
+
+export function formatearFechaDO(valor){
+  if (valor == null) return '';
+  const s = String(valor).trim();
+  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[3]}-${iso[2]}-${iso[1]}`;
+  const dmy = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/); // ya esta en formato dominicano
+  if (dmy) return `${String(dmy[1]).padStart(2,'0')}-${String(dmy[2]).padStart(2,'0')}-${dmy[3]}`;
+  return s; // no reconocida: se respeta lo que haya (no destruir lo que el usuario escribio)
+}
+
+export function formatearMonto(n){
+  const v = typeof n === 'number' ? n : parseFloat(n);
+  if (!Number.isFinite(v)) return '';
+  return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
 export function facturaCompleta(datos){
   return !!(normalizarFecha(datos.fechaEmision) && datos.ncf && datos.rncEmisor && montoValido(datos.total));
 }

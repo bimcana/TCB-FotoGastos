@@ -37,7 +37,8 @@ import { procesar, aplicarRealce, canvasAJpeg } from './process.js';
 import { get, set } from './settings.js';
 import { extraerDatos, diagnosticoGemini, probarApiKey } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
-import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta, normalizarMontoTexto } from './validacion.js';
+import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta, normalizarMontoTexto,
+         formatearFechaDO, formatearMonto } from './validacion.js';
 import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
 
 // Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
@@ -170,13 +171,15 @@ function vaciarCampos(){
 }
 
 function normalizarEnCampos(datos){
-  document.getElementById('c-fecha').value = normalizarFecha(datos.fechaEmision) || datos.fechaEmision || '';
+  // Se MUESTRA al estilo dominicano (DD-MM-AAAA / 2,500.00); al leer los campos se
+  // vuelve a ISO y a numero (normalizarFecha / normalizarMontoTexto).
+  document.getElementById('c-fecha').value = formatearFechaDO(normalizarFecha(datos.fechaEmision) || datos.fechaEmision || '');
   document.getElementById('c-ncf').value = datos.ncf || '';
   document.getElementById('c-rnc').value = datos.rncEmisor || '';
   document.getElementById('c-comercio').value = datos.nombreComercio || '';
-  document.getElementById('c-subtotal').value = montoValido(datos.subtotal) ? datos.subtotal : '';
-  document.getElementById('c-itbis').value = montoValido(datos.itbis) ? datos.itbis : '';
-  document.getElementById('c-total').value = montoValido(datos.total) ? datos.total : '';
+  document.getElementById('c-subtotal').value = montoValido(datos.subtotal) ? formatearMonto(datos.subtotal) : '';
+  document.getElementById('c-itbis').value = montoValido(datos.itbis) ? formatearMonto(datos.itbis) : '';
+  document.getElementById('c-total').value = montoValido(datos.total) ? formatearMonto(datos.total) : '';
 }
 
 function leerCampos(){
@@ -317,10 +320,10 @@ function normalizarCampoEntrada(id){
   if (!v) return;
   if (/fecha/.test(id)){
     const f = normalizarFecha(v);
-    if (f) el.value = f;
+    if (f) el.value = formatearFechaDO(f);        // 17072026 → 17-07-2026
   } else if (/subtotal|itbis|total/.test(id)){
     const n = normalizarMontoTexto(v);
-    if (n != null) el.value = n.toFixed(2);
+    if (n != null) el.value = formatearMonto(n);  // 2500 → 2,500.00
   }
 }
 
@@ -769,7 +772,7 @@ modeloEl.addEventListener('click', (ev) => {
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
          buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
          listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion,
-         carpetasCompartidas, crearCarpeta } from './drive.js';
+         carpetasCompartidas, crearCarpeta, moverACarpeta } from './drive.js';
 import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
 import { filas606, generarXLSX606 } from './f606.js';
 
@@ -892,7 +895,8 @@ document.addEventListener('pointerdown', () => {
 
 // Confirmar y subir + pantalla Gastos (Task 10)
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
-         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo } from './naming.js';
+         nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo,
+         accionesCarpeta, CARPETA_ARCHIVO } from './naming.js';
 
 // Cola offline en IndexedDB con reintento al reconectar (Task 11)
 import { encolar, pendientes, eliminar, cuenta } from './queue.js';
@@ -1069,8 +1073,8 @@ async function abrirCola(){
     const u = URL.createObjectURL(it.blob); colaURLs.push(u);
     img.src = u; img.alt = 'Miniatura';
     const d = it.datos || {};
-    const partes = [d.nombreComercio, normalizarFecha(d.fechaEmision),
-      d.total != null ? 'RD$ ' + Number(d.total).toLocaleString('es-DO', { minimumFractionDigits: 2 }) : null];
+    const partes = [d.nombreComercio, formatearFechaDO(normalizarFecha(d.fechaEmision)),
+      d.total != null ? 'RD$ ' + formatearMonto(d.total) : null];
     const info = document.createElement('div');
     info.className = 'cola-info';
     info.innerHTML = '<b class="num"></b><span>Esperando conexión con Drive</span>';
@@ -1156,13 +1160,13 @@ function filaFactura(ctx, e, nombre){
   info.appendChild(nm);
   if (e && (e.fechaEmision || e.nombreComercio)){
     const dt = document.createElement('div'); dt.className = 'dt num';
-    dt.textContent = [e.fechaEmision, e.nombreComercio].filter(Boolean).join(' · ');
+    dt.textContent = [formatearFechaDO(e.fechaEmision), e.nombreComercio].filter(Boolean).join(' · ');
     info.appendChild(dt);
   }
   const amt = document.createElement('div'); amt.className = 'amt';
   if (e && e.total != null){
     const b = document.createElement('b'); b.className = 'num';
-    b.textContent = 'RD$ ' + Number(e.total).toLocaleString('es-DO', { minimumFractionDigits: 2 });
+    b.textContent = 'RD$ ' + formatearMonto(e.total);
     amt.appendChild(b);
   }
   const chip = document.createElement('span');
@@ -1272,6 +1276,81 @@ async function renderSeccion(carpeta, bodyEl, metaEl){
   }
 }
 
+// ---------- Deslizar una carpeta hacia la izquierda (Fase 7) ----------
+// Muestra «Archivar» (y «Eliminar» si esta vacia) segun accionesCarpeta(). El mes ACTUAL
+// con facturas no ofrece nada: es donde caen las capturas nuevas.
+function cerrarDeslizamientos(){
+  const abiertas = document.querySelectorAll('.acc-fila.deslizada');
+  abiertas.forEach(f => f.classList.remove('deslizada'));
+  return abiertas.length > 0;
+}
+
+async function accionesDeLaCarpeta(sec){
+  if (sec.vacia === undefined){
+    try {
+      const archivos = await listarArchivos(sec.id);
+      sec.vacia = !archivos.some(a => /image\//i.test(a.mimeType || ''));
+    } catch(e){ console.error(e); return []; }
+  }
+  return accionesCarpeta({ nombre: sec.name, vacia: sec.vacia, hoyISOStr: hoyISO() });
+}
+
+function armarDeslizamiento(fila, head, sec){
+  let x0 = null, movido = false;
+  head.addEventListener('pointerdown', ev => { x0 = ev.clientX; movido = false; });
+  head.addEventListener('pointermove', ev => {
+    if (x0 == null) return;
+    if (Math.abs(ev.clientX - x0) > 12) movido = true;
+  });
+  head.addEventListener('pointerup', async ev => {
+    if (x0 == null) return;
+    const dx = ev.clientX - x0;
+    x0 = null;
+    if (!movido) return;                        // fue un toque: lo maneja el click
+    fila.dataset.deslizando = '1';              // evita que el click siguiente expanda
+    if (dx > 0){ fila.classList.remove('deslizada'); return; } // deslizo a la derecha: cerrar
+    cerrarDeslizamientos();
+    const acciones = await accionesDeLaCarpeta(sec);
+    if (!acciones.length){
+      toast(sec.name === nombreCarpetaMes(hoyISO()) ? 'El mes actual no se archiva' : 'Esta carpeta no tiene acciones');
+      return;
+    }
+    const previo = fila.querySelector('.acc-acciones');
+    if (previo) previo.remove();
+    const cont = document.createElement('div');
+    cont.className = 'acc-acciones';
+    for (const acc of acciones){
+      const b = document.createElement('button');
+      b.className = 'acc-accion ' + acc;
+      b.textContent = acc === 'archivar' ? 'Archivar' : 'Eliminar';
+      b.addEventListener('click', ev2 => { ev2.stopPropagation(); ejecutarAccionCarpeta(acc, sec); });
+      cont.appendChild(b);
+    }
+    fila.insertBefore(cont, fila.firstChild);
+    fila.classList.add('deslizada');
+  });
+  head.addEventListener('pointercancel', () => { x0 = null; });
+}
+
+async function ejecutarAccionCarpeta(accion, sec){
+  const raizId = get('carpetaRaizId');
+  if (!raizId) return;
+  if (accion === 'eliminar'){
+    if (!confirm(`¿Eliminar la carpeta «${sec.name}»? Está vacía y irá a la papelera de Drive.`)) return;
+    try { await moverAPapelera(sec.id); toast(`«${sec.name}» eliminada`); refrescarGastos(); }
+    catch(e){ console.error(e); toast('No se pudo eliminar: ' + e.message); }
+    return;
+  }
+  if (!confirm(`¿Archivar «${sec.name}»? Se moverá a la carpeta «${CARPETA_ARCHIVO}» en Drive y dejará de verse en Gastos.`)) return;
+  try {
+    const archivoId = await asegurarCarpeta(CARPETA_ARCHIVO, raizId);
+    await moverACarpeta(sec.id, archivoId, raizId);
+    seccionesAbiertas.delete(sec.name);
+    toast(`«${sec.name}» archivada — está en ${CARPETA_ARCHIVO} en Drive`);
+    refrescarGastos();
+  } catch(e){ console.error(e); toast('No se pudo archivar: ' + e.message); }
+}
+
 async function refrescarGastos(){
   const raizId = get('carpetaRaizId');
   const arbol = document.getElementById('gastos-arbol');
@@ -1283,8 +1362,10 @@ async function refrescarGastos(){
     // Asegura la carpeta del mes actual (las capturas nuevas van ahi) y lista el arbol.
     await asegurarCarpeta(nombreCarpetaMes(hoyISO()), raizId);
     const [carpetas, sueltosTodos] = await Promise.all([listarCarpetas(raizId), listarArchivos(raizId)]);
-    const meses = carpetas.filter(c => ES_MES.test(c.name)).sort((a, b) => b.name.localeCompare(a.name));
-    const otras = carpetas.filter(c => !ES_MES.test(c.name)).sort((a, b) => a.name.localeCompare(b.name));
+    // La carpeta «Archivo» queda FUERA de Gastos a proposito (solo se ve entrando a Drive).
+    const visibles = carpetas.filter(c => c.name !== CARPETA_ARCHIVO);
+    const meses = visibles.filter(c => ES_MES.test(c.name)).sort((a, b) => b.name.localeCompare(a.name));
+    const otras = visibles.filter(c => !ES_MES.test(c.name)).sort((a, b) => a.name.localeCompare(b.name));
     const sueltos = sueltosTodos.filter(a => /image\//i.test(a.mimeType || ''));
     const secciones = [
       ...meses.map(c => ({ id: c.id, name: c.name, esMes: true })),
@@ -1293,6 +1374,8 @@ async function refrescarGastos(){
     if (sueltos.length) secciones.push({ id: raizId, name: 'Carpeta principal', esMes: false, soloSueltos: true });
     arbol.innerHTML = '';
     for (const sec of secciones){
+      const fila = document.createElement('div');
+      fila.className = 'acc-fila';
       const head = document.createElement('button');
       head.className = 'acc-head';
       const abierta = seccionesAbiertas.has(sec.name);
@@ -1302,6 +1385,8 @@ async function refrescarGastos(){
       body.hidden = !abierta;
       const metaEl = head.querySelector('.acc-meta');
       head.addEventListener('click', async () => {
+        if (fila.dataset.deslizando === '1'){ fila.dataset.deslizando = '0'; return; } // fue deslizamiento, no toque
+        if (cerrarDeslizamientos()) return; // primer toque solo cierra las acciones abiertas
         if (body.hidden){
           seccionesAbiertas.add(sec.name);
           body.hidden = false;
@@ -1313,7 +1398,9 @@ async function refrescarGastos(){
           head.querySelector('.acc-chev').textContent = '▸';
         }
       });
-      arbol.appendChild(head);
+      if (!sec.soloSueltos) armarDeslizamiento(fila, head, sec);
+      fila.appendChild(head);
+      arbol.appendChild(fila);
       arbol.appendChild(body);
       if (abierta) renderSeccion(sec, body, metaEl);
     }
@@ -1452,7 +1539,12 @@ document.getElementById('rv-thumb').addEventListener('click', () => {
 function rellenarPanel(f){
   document.getElementById('revisar-titulo').textContent = `Revisar ${f.archivo}`;
   for (const [id, campo] of Object.entries(RV_CAMPOS)){
-    document.getElementById(id).value = f[campo] != null ? f[campo] : '';
+    const v = f[campo];
+    document.getElementById(id).value =
+      v == null ? ''
+      : campo === 'fechaEmision' ? formatearFechaDO(v)
+      : ['subtotal','itbis','total'].includes(campo) ? formatearMonto(v)
+      : v;
   }
 }
 
