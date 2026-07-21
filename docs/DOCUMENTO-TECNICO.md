@@ -15,6 +15,10 @@ y el Excel Formato 606. Multi-usuario sobre una carpeta compartida. La versión 
 
 - Producción: `https://bimcana.github.io/TCB-FotoGastos/` · repo `bimcana/TCB-FotoGastos`
 - Ramas: trabajo en `faseN` → merge --no-ff a `main` → `gh-pages` se fuerza a `main` y se empuja.
+- **GitHub Pages de la Full publica desde `main`** (verificado 2026-07-21: TODAS las
+  ejecuciones de `pages-build-deployment` tienen `head_branch: main`). `gh-pages` se
+  mantiene sincronizada por convención pero **no** es la que se publica. Ojo: la **Lite
+  sí publica desde `gh-pages`** — son distintas, no asumir la misma configuración.
 
 ## 2. Mapa de módulos (src/)
 
@@ -69,6 +73,12 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
 2. **UN push por publicación**: esperar a que la construcción de Pages termine antes de
    volver a empujar; los pushes encadenados se CANCELAN entre sí (así se congeló el sitio
    3 días en fase4). Verificar post-deploy: `curl -s .../sw.js?x=$(date +%s) | head -1`.
+   **Un push puede NO disparar la construcción** (pasó en fase8: `main` actualizada y cero
+   ejecuciones). Antes de culpar a la caché, comprobar el estado real:
+   `curl -s "https://api.github.com/repos/bimcana/TCB-FotoGastos/actions/runs?per_page=3"`
+   — si no hay ninguna `queued`/`in_progress`, no hay nada en vuelo y re-disparar con
+   `git commit --allow-empty` + push es seguro (la regla de arriba protege contra empujar
+   SOBRE una cola activa, no contra re-disparar cuando no hay ninguna).
 3. **`.nojekyll` existe y no se borra** (sin él, Jekyll procesa 40 MB y las builds mueren).
 4. Scope de Drive es **`auth/drive` completo**, PERO la app solo opera dentro de
    `carpetaRaizId` (vinculada POR ID, no por nombre). No añadir consultas fuera de ella.
