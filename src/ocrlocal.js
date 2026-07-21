@@ -81,8 +81,9 @@ function ultimoMonto(linea){
   return normalizarMontoTexto(matches[matches.length - 1]);
 }
 
-function extraerMontoPorEtiqueta(lineas, etiquetaRegex){
+function extraerMontoPorEtiqueta(lineas, etiquetaRegex, excluirRegex = null){
   for (const l of lineas){
+    if (excluirRegex && excluirRegex.test(l)) continue;
     if (etiquetaRegex.test(l)){
       const n = ultimoMonto(l);
       if (n !== null) return n;
@@ -91,7 +92,44 @@ function extraerMontoPorEtiqueta(lineas, etiquetaRegex){
   return null;
 }
 
+// "TOTAL" aparece en muchas lineas que NO son el total a pagar (sub-total, total de
+// descuento, total de articulos, total ITBIS...). Primero se busca la etiqueta fuerte
+// ("TOTAL A PAGAR", "GRAN TOTAL"...); si no existe, un "total" pelado excluyendo esas.
+const RE_TOTAL_FUERTE = /total\s+a\s+pagar|total\s+general|gran\s+total|monto\s+total|total\s+rd/i;
+const RE_TOTAL_NO = /sub\s*-?\s*total|descuento|ahorro|art[ií]culos|items?\b|puntos|balance|itbis|itebis|impuesto|propina|efectivo|cambio|devuelta/i;
+
+function extraerTotal(lineas){
+  const fuerte = extraerMontoPorEtiqueta(lineas, RE_TOTAL_FUERTE);
+  if (fuerte !== null) return fuerte;
+  return extraerMontoPorEtiqueta(lineas, /\btotal\b/i, RE_TOTAL_NO);
+}
+
+// Lineas que NO son el nombre del comercio: contactos, direcciones, encabezados
+// fiscales y texto administrativo tipico de la cabecera de un voucher.
+const RE_NO_COMERCIO = /rnc|tel[ef.:\s]|tel$|fax|www\.|\.com|\.do\b|@|factura|cr[eé]dito|consumidor|fiscal|ncf|fecha|caja|cajero|calle|\bav\b|avenida|aut\.|autopista|carretera|\bkm\b|esq(uina|\.)|plaza|centro comercial|local\b|sucursal|cliente|orden|mesa\b/i;
+const RE_SUFIJO_EMPRESA = /\b(srl|s\.?\s?r\.?\s?l|s\.?\s?a\.?\s?s?|eirl|e\.?\s?i\.?\s?r\.?\s?l)\b\.?/i;
+
+// El nombre del comercio suele ser de las PRIMERAS lineas (logo/encabezado). Se
+// prefiere una linea con sufijo societario (SRL, SA, EIRL); si no hay, la primera
+// linea "con cara de nombre": letras dominantes, sin patrones de contacto/direccion,
+// sin fechas ni cifras largas. Descarte pedido por Ari: direccion o texto sin sentido.
 function extraerNombreComercio(lineas){
+  const cabecera = lineas.slice(0, 8);
+  const candidata = l => {
+    if (!/[a-záéíóúñ]/i.test(l)) return false;
+    if (RE_NO_COMERCIO.test(l)) return false;
+    if (RE_FECHA_ISO.test(l) || RE_FECHA_SLASH.test(l)) return false;
+    const letras = (l.match(/[a-záéíóúñ]/gi) || []).length;
+    const digitos = (l.match(/\d/g) || []).length;
+    if (digitos >= letras) return false;    // mas numeros que letras: no es un nombre
+    if (letras < 3) return false;           // restos de OCR sin sentido
+    return true;
+  };
+  const conSufijo = cabecera.find(l => candidata(l) && RE_SUFIJO_EMPRESA.test(l));
+  if (conSufijo) return conSufijo;
+  const primera = cabecera.find(candidata);
+  if (primera) return primera;
+  // Respaldo historico: primera linea con letras, aunque no pase los filtros.
   for (const l of lineas){
     if (/[a-záéíóúñ]/i.test(l)) return l;
   }
@@ -113,9 +151,9 @@ export function parsearTextoFactura(texto, opciones = {}){
     ncf: extraerNcf(texto),
     rncEmisor: extraerRncEmisor(lineas, rncPropio),
     nombreComercio: extraerNombreComercio(lineas),
-    subtotal: extraerMontoPorEtiqueta(lineas, /\bsub\s?total\b/i),
-    itbis: extraerMontoPorEtiqueta(lineas, /i\.?\s?t\.?\s?e?\.?\s?b\.?\s?i\.?\s?s|itebis|impuesto/i),
-    total: extraerMontoPorEtiqueta(lineas, /\btotal\b/i)
+    subtotal: extraerMontoPorEtiqueta(lineas, /\bsub\s*-?\s*total\b/i),
+    itbis: extraerMontoPorEtiqueta(lineas, /i\.?\s?t\.?\s?e?\.?\s?b\.?\s?i\.?\s?s|itebis|impuesto/i, /exento|exenta/i),
+    total: extraerTotal(lineas)
   };
 }
 

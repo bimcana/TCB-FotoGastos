@@ -35,6 +35,12 @@ export function initAuth(clientId){
 
 export function conectado(){ return !!accessToken && Date.now() < expiraEn; }
 
+// Token aun valido pero cerca de morir (el implicito vive 60 min fijos): renovarlo en
+// un gesto del usuario ANTES de que caduque evita la ventana de "desconectado" a la hora.
+export function porExpirar(margenMs = 5 * 60 * 1000){
+  return !!accessToken && Date.now() < expiraEn && (expiraEn - Date.now()) < margenMs;
+}
+
 let onDesconexion = null;
 export function alDesconectar(cb){ onDesconexion = cb; }
 

@@ -109,3 +109,52 @@ test('monto europeo (3.620,00) y decimal con coma', () => {
   assert.equal(parsearTextoFactura('X\nTOTAL 3.620,00').total, 3620);
   assert.equal(parsearTextoFactura('X\nTOTAL 45,50').total, 45.5);
 });
+
+// --- Fase 8: total a pagar vs otras lineas con "total" (patron Sirena/supermercado) ---
+const SIRENA = `Sirena
+SAN JUAN Tel: 809-472-4444
+GRUPO RAMOS S.A.
+RNC: 101796822
+15/07/26 18:24:36
+e-NCF:E310011691003
+BIMCANA SRL
+FACTURA DE CREDITO FISCAL ELECTRONICO
+CUCHARA BAMBO 9.15 60.00
+SUB-TOTAL 5,129.66
+TOTAL A PAGAR 299.97 5,429.63
+MASTERCA 5,429.63
+TOTAL DE DESCUENTO PROMO. 3.00-
+TOTAL ITBIS 299.97
+NUMERO ARTICULOS VENDIDOS - 29`;
+
+test('total = TOTAL A PAGAR (ultimo monto), no el descuento ni el total de ITBIS', () => {
+  assert.equal(parsearTextoFactura(SIRENA).total, 5429.63);
+});
+
+test('SUB-TOTAL con guion se extrae como subtotal', () => {
+  assert.equal(parsearTextoFactura(SIRENA).subtotal, 5129.66);
+});
+
+test('e-NCF electronico se extrae del recibo', () => {
+  assert.equal(parsearTextoFactura(SIRENA).ncf, 'E310011691003');
+});
+
+test('nombreComercio: salta telefono/direccion y prefiere la razon social', () => {
+  // "Sirena" es la primera linea, pero GRUPO RAMOS S.A. lleva sufijo societario
+  assert.equal(parsearTextoFactura(SIRENA).nombreComercio, 'GRUPO RAMOS S.A.');
+});
+
+test('nombreComercio: sin sufijo societario cae a la primera linea con cara de nombre', () => {
+  const t = `FERRETERIA EL MARTILLO
+Av. Espana #45, Punta Cana
+Tel: 809-555-1234
+RNC: 101234567
+NCF: B0100000009
+TOTAL 500.00`;
+  assert.equal(parsearTextoFactura(t).nombreComercio, 'FERRETERIA EL MARTILLO');
+});
+
+test('total pelado sigue funcionando cuando no hay etiqueta fuerte', () => {
+  const t = 'COMERCIO X\nSUB-TOTAL 100.00\nTOTAL 118.00';
+  assert.equal(parsearTextoFactura(t).total, 118);
+});

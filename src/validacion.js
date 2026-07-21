@@ -51,6 +51,60 @@ export function normalizarMontoTexto(v){
 
 export function montoValido(n){ return typeof n === 'number' && Number.isFinite(n) && n >= 0; }
 
+// --- RNC (Fase 8) ----------------------------------------------------------
+// La consulta en linea a DGII no es viable desde una PWA estatica (la pagina de
+// consultas es WebForms con postback y sin CORS; el web service movil fue retirado).
+// En su lugar se valida el DIGITO VERIFICADOR oficial: detecta RNC mal leidos por el
+// OCR sin gastar red ni cuota de IA. Verificado con RNC reales (101796822, 133231824).
+export function rncValido(rnc){
+  const d = String(rnc == null ? '' : rnc).replace(/\D/g, '');
+  if (d.length === 9){ // RNC juridico: modulo 11 con pesos fijos
+    const pesos = [7, 9, 8, 6, 5, 4, 3, 2];
+    let suma = 0;
+    for (let i = 0; i < 8; i++) suma += Number(d[i]) * pesos[i];
+    const r = suma % 11;
+    const dv = r === 0 ? 2 : r === 1 ? 1 : 11 - r;
+    return dv === Number(d[8]);
+  }
+  if (d.length === 11){ // cedula: variante Luhn sobre los primeros 10 digitos
+    let suma = 0;
+    for (let i = 0; i < 10; i++){
+      let p = Number(d[i]) * (i % 2 === 0 ? 1 : 2);
+      if (p > 9) p -= 9;
+      suma += p;
+    }
+    return (10 - (suma % 10)) % 10 === Number(d[10]);
+  }
+  return false;
+}
+
+// --- Deduccion de montos (Fase 8) ------------------------------------------
+// Patron contable: total = subtotal + itbis. Si el motor de lectura trae DOS de los
+// tres, el tercero se deduce por suma/resta (nunca se pisa un valor ya leido, y un
+// resultado negativo se descarta: mejor null que un monto imposible).
+export function deducirMontos(datos){
+  const d = { ...datos };
+  const v = x => montoValido(x) ? x : null;
+  const sub = v(d.subtotal), itb = v(d.itbis), tot = v(d.total);
+  const r2 = x => Math.round(x * 100) / 100;
+  if (tot == null && sub != null && itb != null) d.total = r2(sub + itb);
+  else if (sub == null && tot != null && itb != null && tot - itb >= 0) d.subtotal = r2(tot - itb);
+  else if (itb == null && tot != null && sub != null && tot - sub >= 0) d.itbis = r2(tot - sub);
+  return d;
+}
+
+// Post-proceso comun a TODOS los motores de lectura (Gemini, OCR local): descarta el
+// RNC del comprador (perfil Empresa) que los vouchers traen como si fuera el emisor,
+// y deduce el monto faltante. Un solo lugar: capture, importacion y "Leer con IA".
+export function afinarDatosFactura(datos, opciones = {}){
+  if (!datos) return datos;
+  const d = { ...datos };
+  const propio = String(opciones.rncPropio || '').replace(/\D/g, '');
+  const rnc = String(d.rncEmisor || '').replace(/\D/g, '');
+  if (propio && rnc && rnc === propio) d.rncEmisor = null;
+  return deducirMontos(d);
+}
+
 // --- Presentacion (Fase 7) -------------------------------------------------
 // REGLA: internamente TODO se guarda en ISO (AAAA-MM-DD) porque de ahi salen los nombres
 // de carpeta, el orden y el Formato 606. Estas dos funciones son SOLO para mostrar y

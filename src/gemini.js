@@ -20,13 +20,21 @@ const PROMPT =
   'de República Dominicana. Reglas: (1) fechaEmision es la fecha en que se emitió la factura, NUNCA "Válido hasta", ' +
   '"Fecha límite" ni vencimiento; devuélvela como AAAA-MM-DD. (2) rncEmisor y nombreComercio son del COMERCIO que emite ' +
   '(el proveedor), no del cliente que compra. (3) ncf es el comprobante fiscal (serie B o E). (4) Los montos son números ' +
-  'sin símbolo de moneda ni separador de miles. Si un dato no aparece, usa null.';
+  'sin símbolo de moneda ni separador de miles. (5) nombreComercio es el nombre comercial destacado en la cabecera ' +
+  '(el texto grande o del logo), NO la dirección, la sucursal ni frases genéricas; si hay razón social (SRL, SAS, EIRL), prefiérela. ' +
+  '(6) Los vouchers suelen imprimir también el RNC del CLIENTE que compra: ese NUNCA es rncEmisor. ' +
+  '(7) Devuelve subtotal e itbis solo si están impresos (no los calcules). Si un dato no aparece, usa null.';
 
-export function cuerpoPeticion(base64Jpeg){
+// opciones.rncCliente: RNC del perfil de Empresa (el comprador). Se le dice al modelo
+// explicitamente para que jamas lo devuelva como rncEmisor (trampa real de vouchers).
+export function cuerpoPeticion(base64Jpeg, opciones = {}){
+  let prompt = PROMPT;
+  const rncCliente = String(opciones.rncCliente || '').replace(/\D/g, '');
+  if (rncCliente) prompt += ` ATENCIÓN: el RNC ${rncCliente} es el del CLIENTE que compra — nunca lo devuelvas como rncEmisor.`;
   return {
     contents: [{ parts: [
       { inline_data: { mime_type: 'image/jpeg', data: base64Jpeg } },
-      { text: PROMPT }
+      { text: prompt }
     ] }],
     generationConfig: { responseMimeType: 'application/json', responseSchema: ESQUEMA }
   };
@@ -68,11 +76,11 @@ function canvasABase64(canvas){
   return fuente.toDataURL('image/jpeg', 0.85).split(',')[1];
 }
 
-export async function extraerDatos(canvas, apiKey, modelo = MODELO_DEFECTO, signal = undefined){
+export async function extraerDatos(canvas, apiKey, modelo = MODELO_DEFECTO, signal = undefined, opciones = {}){
   const b64 = canvasABase64(canvas);
   const r = await fetch(`${ENDPOINT(modelo)}?key=${encodeURIComponent(apiKey)}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(cuerpoPeticion(b64)),
+    body: JSON.stringify(cuerpoPeticion(b64, opciones)),
     signal
   });
   if (!r.ok){
