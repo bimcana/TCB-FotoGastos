@@ -1,5 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { entradaDeFactura as _entradaF10 } from '../src/indice.js';
+
+test('entradaDeFactura: propaga validadaPorUsuario al estado (Fase 10)', () => {
+  const d = { fechaEmision:'2026-07-11', ncf:'B0100033899', rncEmisor:'131642918', total:1363.49 };
+  assert.equal(_entradaF10('Compra_110.jpg', d, 'local', false).estado, 'pendiente');
+  assert.equal(_entradaF10('Compra_110.jpg', d, 'local', false, { validadaPorUsuario: true }).estado, 'completa');
+});
 import { entradaDeFactura, agregarEntrada, quitarEntrada, descDeEntrada, entradaDeDesc, conciliarIndice } from '../src/indice.js';
 
 test('descDeEntrada/entradaDeDesc: ida y vuelta con version', () => {

@@ -41,26 +41,121 @@ export function cuadrilateroValido(e, wFrame, hFrame){
   return true;
 }
 
-// Confianza del recorte automatico (Fase 9): una factura es siempre un papel de 4
-// lados, a lo sumo en perspectiva. Si el cuadrilatero detectado tiene forma plausible
-// de papel, la importacion recorta SOLA (sin editor); el editor queda para los dudosos.
-// Criterio: cuadrilatero valido + area >= 15% de la imagen + los 4 angulos internos
-// entre 45 y 135 grados (una perspectiva razonable no los deforma mas que eso).
-export function recorteConfiable(e, wFrame, hFrame){
-  if (!e || e.length !== 4) return false;
-  if (!cuadrilateroValido(e, wFrame, hFrame)) return false;
-  if (areaCuadrilatero(e) < wFrame * hFrame * 0.15) return false;
+// Angulos internos del cuadrilatero, en grados (orden tl,tr,br,bl).
+export function angulosInternos(e){
+  const out = [];
   for (let i = 0; i < 4; i++){
     const a = e[(i + 3) % 4], b = e[i], c = e[(i + 1) % 4];
     const v1 = { x: a.x - b.x, y: a.y - b.y };
     const v2 = { x: c.x - b.x, y: c.y - b.y };
     const den = Math.hypot(v1.x, v1.y) * Math.hypot(v2.x, v2.y);
-    if (!den) return false;
+    if (!den) return null;
     const cos = Math.max(-1, Math.min(1, (v1.x * v2.x + v1.y * v2.y) / den));
-    const ang = Math.acos(cos) * 180 / Math.PI;
-    if (ang < 45 || ang > 135) return false;
+    out.push(Math.acos(cos) * 180 / Math.PI);
   }
-  return true;
+  return out;
+}
+
+// Confianza del recorte automatico. Fase 10 (tras el fallo de campo de Ari: un quad
+// torcido pasaba el filtro y se aplicaba SIN editor, peor que antes): el criterio se
+// endurece porque el modelo real es "papel rectangular fotografiado de frente".
+// Ahora exige, ademas de area: angulos cerca de 90 (+-25) Y lados opuestos de largo
+// parecido (<=30% de diferencia). Un trapecio deformado por una mala deteccion falla
+// aqui y abre el editor, que es el comportamiento seguro.
+export function recorteConfiable(e, wFrame, hFrame){
+  if (!e || e.length !== 4) return false;
+  if (!cuadrilateroValido(e, wFrame, hFrame)) return false;
+  if (areaCuadrilatero(e) < wFrame * hFrame * 0.15) return false;
+  const angs = angulosInternos(e);
+  if (!angs) return false;
+  if (angs.some(a => a < 65 || a > 115)) return false;
+  return ladosOpuestosParecidos(e, 0.30);
+}
+
+// Lados opuestos de largo similar: un rectangulo (aun en perspectiva suave) los tiene
+// parecidos; una deteccion que se comio parte del fondo, no.
+export function ladosOpuestosParecidos(e, tol = 0.30){
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const arriba = d(e[0], e[1]), abajo = d(e[3], e[2]);
+  const izq = d(e[0], e[3]), der = d(e[1], e[2]);
+  const dif = (p, q) => Math.abs(p - q) / Math.max(p, q, 1);
+  return dif(arriba, abajo) <= tol && dif(izq, der) <= tol;
+}
+
+// --- Fase 10: recortes pensados para FACTURAS (papel rectangular) ----------
+// Pedido de Ari: aunque no se identifiquen las esquinas, tomar los laterales del papel
+// y extenderlos al borde superior e inferior de la foto, alineando con el texto.
+
+// Bordes laterales robustos a partir de los extremos claros por fila: se descartan las
+// filas sin papel y se usan percentiles (no min/max) para que una veta del fondo o una
+// esquina doblada no arrastre el borde. Puro: testeable en Node.
+export function bordesLaterales(filas, ancho, percentil = 0.1){
+  const validas = filas.filter(f => f && f.der > f.izq);
+  if (validas.length < 3) return null;
+  const izqs = validas.map(f => f.izq).sort((a, b) => a - b);
+  const ders = validas.map(f => f.der).sort((a, b) => a - b);
+  const k = Math.min(izqs.length - 1, Math.max(0, Math.floor(izqs.length * percentil)));
+  const izq = izqs[k];                       // percentil bajo: borde izquierdo del papel
+  const der = ders[ders.length - 1 - k];      // percentil alto: borde derecho
+  if (der - izq < ancho * 0.15) return null;  // banda demasiado angosta para ser un papel
+  return { izq, der };
+}
+
+// Fraccion de pixeles CLAROS dentro del recorte (0..1). La geometria no basta para
+// saber si un recorte es bueno: el fallo de campo de Ari era un paralelogramo rotado
+// (angulos ~90 y lados opuestos iguales, pasa toda guarda geometrica) que se habia
+// comido una franja de granito. Una factura bien recortada es casi todo papel claro,
+// asi que esta medida SI lo distingue. Requiere OpenCV.
+export function fraccionClara(srcCanvas, esquinas, maxLado = 400){
+  let p = null, mascara = null, bin = null, dentro = null;
+  try {
+    p = prepararGris(srcCanvas, maxLado);
+    // Umbral global de la imagen: separa papel (claro) de fondo (oscuro).
+    bin = new cv.Mat();
+    cv.threshold(p.gray, bin, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+    mascara = new cv.Mat.zeros(p.h, p.w, cv.CV_8U);
+    const pts = esquinas.map(q => [Math.round(q.x * p.escala), Math.round(q.y * p.escala)]).flat();
+    const poly = cv.matFromArray(4, 1, cv.CV_32SC2, pts);
+    const vec = new cv.MatVector();
+    vec.push_back(poly);
+    cv.fillPoly(mascara, vec, new cv.Scalar(255));
+    poly.delete(); vec.delete();
+    const totalDentro = cv.countNonZero(mascara);
+    if (!totalDentro) return 0;
+    dentro = new cv.Mat();
+    cv.bitwise_and(bin, mascara, dentro);
+    return cv.countNonZero(dentro) / totalDentro;
+  } catch(e){
+    console.warn('fraccionClara fallo:', e.message);
+    return 1; // ante la duda no bloquear el recorte (lo valida la geometria)
+  } finally {
+    if (dentro) dentro.delete();
+    if (mascara) mascara.delete();
+    if (bin) bin.delete();
+    if (p){ p.gray.delete(); p.mat.delete(); }
+  }
+}
+
+// PEDIDO LITERAL DE ARI (Fase 10): "aun si no se identifican las esquinas, que se tomen
+// por los laterales a su punto mas alto de los bordes superior e inferior de la foto".
+// Toma los dos lados largos del papel, los PROLONGA hasta y=0 e y=H, y devuelve el quad
+// resultante: bordes superior e inferior sobre el marco de la foto, laterales siguiendo
+// la inclinacion real del papel (que en una factura es la del texto impreso).
+// Puro: testeable en Node.
+export function extenderLateralesAlMarco(e, H){
+  if (!e || e.length !== 4 || !(H > 0)) return null;
+  const [tl, tr, br, bl] = e;
+  const xEn = (p, q, y) => {
+    if (Math.abs(q.y - p.y) < 1e-6) return null; // lado horizontal: no se puede prolongar
+    return p.x + (q.x - p.x) * (y - p.y) / (q.y - p.y);
+  };
+  const izqArriba = xEn(tl, bl, 0), izqAbajo = xEn(tl, bl, H);
+  const derArriba = xEn(tr, br, 0), derAbajo = xEn(tr, br, H);
+  if ([izqArriba, izqAbajo, derArriba, derAbajo].some(v => v == null)) return null;
+  return [
+    { x: izqArriba, y: 0 }, { x: derArriba, y: 0 },
+    { x: derAbajo, y: H }, { x: izqAbajo, y: H }
+  ];
 }
 
 export function escalaTrabajo(w, h, maxLado = 700){
@@ -206,6 +301,132 @@ export function detectarDocumento(srcCanvas, maxLado = 700, opciones = {}){
   } finally {
     if (gray) gray.delete();
     if (mat) mat.delete();
+  }
+}
+
+// --- Fase 10: motores de recorte para papel rectangular ------------------
+// Reduce el canvas a escala de trabajo y devuelve {mat, gray, escala, w, h}.
+// El llamador libera mat y gray.
+function prepararGris(srcCanvas, maxLado){
+  const escala = escalaTrabajo(srcCanvas.width, srcCanvas.height, maxLado);
+  const w = Math.round(srcCanvas.width * escala), h = Math.round(srcCanvas.height * escala);
+  const small = document.createElement('canvas');
+  small.width = w; small.height = h;
+  small.getContext('2d').drawImage(srcCanvas, 0, 0, w, h);
+  const mat = cv.imread(small);
+  const gray = new cv.Mat();
+  cv.cvtColor(mat, gray, cv.COLOR_RGBA2GRAY);
+  cv.GaussianBlur(gray, gray, new cv.Size(5, 5), 0);
+  return { mat, gray, escala, w, h };
+}
+
+// Contorno mas grande de un binario (Mat). Devuelve {contorno, area} o null; el
+// llamador libera `contorno`.
+function contornoMayor(th){
+  let contours, hier;
+  try {
+    contours = new cv.MatVector();
+    hier = new cv.Mat();
+    cv.findContours(th, contours, hier, cv.RETR_EXTERNAL, cv.CHAIN_APPROX_SIMPLE);
+    let mejor = null, mejorArea = 0;
+    for (let i = 0; i < contours.size(); i++){
+      const c = contours.get(i);
+      const area = cv.contourArea(c);
+      if (area > mejorArea){
+        if (mejor) mejor.delete();
+        mejor = c; mejorArea = area;
+      } else c.delete();
+    }
+    return mejor ? { contorno: mejor, area: mejorArea } : null;
+  } finally {
+    if (hier) hier.delete();
+    if (contours) contours.delete();
+  }
+}
+
+// RECTANGULO MINIMO (Fase 10): el modelo correcto de una factura es un rectangulo, no
+// un cuadrilatero cualquiera. `minAreaRect` da SIEMPRE 4 esquinas limpias aunque el
+// borde del papel este ondulado, roto o con sombra — que es donde `approxPolyDP`
+// producia los quads torcidos que Ari vio en campo. La guarda de LLENADO (area del
+// contorno / area del rectangulo) rechaza manchas que no son de verdad rectangulares
+// (p. ej. papel fundido con una veta clara del granito).
+export function rectanguloDePapel(srcCanvas, maxLado = 1200, minLlenado = 0.82){
+  let p = null;
+  try {
+    p = prepararGris(srcCanvas, maxLado);
+    for (const bin of [binOtsu, binAdaptativa, binCanny]){
+      let th = null, mayor = null;
+      try {
+        th = bin(p.gray);
+        mayor = contornoMayor(th);
+        if (!mayor || mayor.area < p.w * p.h * 0.10) continue;
+        const rot = cv.minAreaRect(mayor.contorno);
+        const areaRect = rot.size.width * rot.size.height;
+        if (!areaRect || mayor.area / areaRect < minLlenado) continue; // no es rectangular
+        const pts = cv.RotatedRect.points(rot).map(q => ({ x: q.x / p.escala, y: q.y / p.escala }));
+        const ordenado = ordenarEsquinas(pts);
+        if (cuadrilateroValido(ordenado, srcCanvas.width, srcCanvas.height)) return ordenado;
+      } finally {
+        if (mayor && mayor.contorno) mayor.contorno.delete();
+        if (th) th.delete();
+      }
+    }
+    return null;
+  } finally {
+    if (p){ p.gray.delete(); p.mat.delete(); }
+  }
+}
+
+// ANGULO DEL TEXTO (Fase 10, pedido de Ari "reconociendo el texto, alinear con ellos
+// borde superior e inferior"): las lineas de texto de una factura son franjas oscuras
+// horizontales. Al rotar la imagen, el perfil de proyeccion por filas tiene MAXIMA
+// varianza cuando las lineas quedan horizontales — ese angulo es la inclinacion real.
+// BANDA LATERAL (Fase 10, pedido de Ari para el ticket largo que se sale del encuadre):
+// cuando no hay 4 esquinas fiables, se toman los LATERALES del papel y se prolongan al
+// borde superior e inferior de la FOTO.
+// La inclinacion sale del propio papel (`rectanguloDePapel`), no de un analisis del
+// texto: se probo medir el angulo por proyeccion de las lineas de texto y devolvia 10
+// grados donde el ticket estaba a 5 — un enderezado equivocado empeora el recorte. En
+// una factura el texto se imprime paralelo al borde del papel, asi que la orientacion
+// del papel da el MISMO resultado visual y es fiable. Respaldo sin inclinacion: banda
+// recta a partir de los extremos claros por fila.
+export function bandaDePapel(srcCanvas, maxLado = 1200){
+  const H = srcCanvas.height;
+  // Solo se hereda la INCLINACION del papel si este se identifico con el criterio
+  // ESTRICTO. Con el criterio laxo, un blob de papel + vetas del granito daba un
+  // rectangulo girado ~20 grados y la banda salia disparatada (medido en pruebas):
+  // ante la duda, banda recta — mejor recta que torcida.
+  const rect = rectanguloDePapel(srcCanvas, maxLado);
+  if (rect){
+    const ext = extenderLateralesAlMarco(rect, H);
+    if (ext) return ordenarEsquinas(ext);
+  }
+  let p = null, th = null;
+  try {
+    p = prepararGris(srcCanvas, maxLado);
+    th = binOtsu(p.gray);
+    // Extremos claros por fila (el papel es lo brillante sobre el fondo).
+    const filas = [];
+    for (let y = 0; y < p.h; y++){
+      let izq = -1, der = -1;
+      for (let x = 0; x < p.w; x++){
+        if (th.ucharPtr(y, x)[0]){ if (izq < 0) izq = x; der = x; }
+      }
+      filas.push(izq < 0 ? null : { izq, der });
+    }
+    const b = bordesLaterales(filas, p.w);
+    if (!b) return null;
+    if (b.der - b.izq > p.w * 0.985) return null; // ocupa todo el ancho: no separo el papel
+    const izq = b.izq / p.escala, der = b.der / p.escala;
+    return ordenarEsquinas([
+      { x: izq, y: 0 }, { x: der, y: 0 }, { x: der, y: H }, { x: izq, y: H }
+    ]);
+  } catch(e){
+    console.warn('bandaDePapel fallo:', e.message);
+    return null;
+  } finally {
+    if (th) th.delete();
+    if (p){ p.gray.delete(); p.mat.delete(); }
   }
 }
 

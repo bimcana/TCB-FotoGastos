@@ -55,6 +55,12 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   nombreComercio, subtotal, itbis, total, origen, duplicada, subidoEn, estado, revisadaIA,
   driveId?, provisional?, procesadaDesde?}]}`. Estados: `completa` (4 esenciales del 606:
   fecha+NCF+RNC+total) / `incompleta` / `pendiente` (espera validación del usuario).
+  **Fase 10:** «Confirmar y subir» con la tarjeta a la vista marca
+  `datos.validadaPorUsuario` → `estadoFactura(datos, origen, {validadaPorUsuario})`
+  devuelve `completa` aunque el motor haya sido el OCR local. Sin esto, con OCR por
+  defecto (Fase 9) TODA captura caía como «Pendiente de revisión» pese a haberla
+  revisado el humano. `pendiente` queda solo para lo que nadie validó: provisionales
+  (sin fecha) y lo que rellena «Leer con IA». Confirmar NO tapa un esencial vacío.
 - **`description` del archivo en Drive** = la MISMA entrada como JSON con `v:1` — es la
   fuente de verdad que viaja con el archivo. **TODA escritura de metadatos debe actualizarla**
   (subida, `actualizarEntradaConReArchivo`, re-archivado). `conciliarIndice` restaura al
@@ -107,10 +113,22 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   usuario repite la foto varias veces mirando cómo quedó; Gemini en cada intento agota
   la cuota gratis. La IA corre SOLO a pedido: toggle IA en la tarjeta o «Leer con IA»
   en Gastos. NO volver a poner 'ia' como `motorPreferido` por defecto.
-- **Lote/galería**: `importarLote` → por imagen: detección 1200px → IA → **Fase 9: si
-  `recorteConfiable(esquinas,w,h)` (detect.js, puro: cuadrilátero válido + área ≥15% +
-  4 ángulos entre 45–135°) el recorte se aplica SOLO, sin editor** (✂ en Revisión
-  re-ajusta); el editor solo abre para detecciones dudosas o fallidas.
+- **Lote/galería (Fase 10, `recortarImportada` en main.js)**: cascada
+  `detectarDocumento` → `rectanguloDePapel` (minAreaRect + guarda de llenado ≥0.82: una
+  factura ES un rectángulo, robusto a bordes ondulados donde approxPolyDP daba quads
+  torcidos) → IA → `bandaDePapel` → editor. Se acepta el PRIMERO que pase **dos** filtros:
+  1. **Forma** — `recorteConfiable`: cuadrilátero válido + área ≥15% + ángulos 65–115° +
+     `ladosOpuestosParecidos` (≤30%).
+  2. **Contenido** — `fraccionClara(canvas, esquinas) ≥ 0.75`. **Esta es la que importa.**
+     El fallo de campo de Ari era un *paralelogramo rotado* que pasaba TODA guarda
+     geométrica (ángulos ~90°, lados iguales) pero se había comido una franja de granito;
+     solo la fracción de píxeles claros lo distingue (medido: 0.61 vs 0.98 del correcto).
+     **No relajar este umbral sin volver a medir con fotos reales.**
+  `bandaDePapel` = pedido literal de Ari: laterales del papel prolongados a los bordes
+  superior e inferior de la FOTO (`extenderLateralesAlMarco`, puro), con la inclinación
+  del propio papel. **Se probó medir el ángulo por proyección del texto y devolvía 10°
+  donde el ticket estaba a 5°** — se descartó: en una factura el texto es paralelo al
+  borde del papel, así que la geometría del papel da el mismo resultado y es fiable.
 - **Ajena ("Sin procesar")**: `procesarAjena` → mismo pipeline → al confirmar, original a
   papelera (`__origenAjeno`, se limpia en shutter/lote/cancelar — no quitar esa limpieza).
 - **Revisor background: ELIMINADO (decisión de Ari 2026-07-21, protección de cuota).**
@@ -125,9 +143,15 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   (throttle 30 s) — no quitar ese listener: es lo que evita el "No conectada" tras 1 h.
   Fase 8: el mismo listener renueva PROACTIVAMENTE si el token expira en <5 min
   (`porExpirar` en drive.js) — refresca solo el token, sin `postConexion`. Botón
-  `#btn-reconectar` («Reconectar a Drive») en el encabezado de Gastos: visible solo
-  desconectado (lo muestra `mostrarAvisoReconectar`, lo oculta `postConexion`); mismo
-  flujo de un toque que el subtítulo tocable (`reconectarConGesto`).
+  `#btn-reconectar` («Reconectar a Drive») en el encabezado de Gastos, mismo flujo de un
+  toque que el subtítulo tocable (`reconectarConGesto`).
+  **Fase 10 — el botón se deriva del estado REAL, no del momento de la llamada:**
+  `debeMostrarReconectar(conectado, huboConexionPrevia)` (puro, en drive.js, con tests) +
+  `sincronizarEstadoDrive()` en main.js, invocado al abrir Gastos, en `visibilitychange`
+  y tras cada intento de conexión. Además `postConexion` oculta el aviso en su PRIMERA
+  línea: antes lo hacía al final, así que si fallaba a mitad (carpeta inaccesible,
+  `_empresa.json` ilegible) el botón quedaba visible con Drive conectado — el bug de
+  campo. `mostrarAvisoReconectar` también se auto-anula si `conectado()`.
 - **Lectura Fase 8 (calidad de OCR/IA)**: la lectura NO usa el filtro visual activo —
   `canvasParaLectura(motor)` en main.js da a cada motor su mejor estado de imagen desde
   `canvasPlano` con intensidad 65: Gemini → 'color' (auto-color), Tesseract → 'grises';

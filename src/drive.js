@@ -41,6 +41,15 @@ export function porExpirar(margenMs = 5 * 60 * 1000){
   return !!accessToken && Date.now() < expiraEn && (expiraEn - Date.now()) < margenMs;
 }
 
+// UNICA regla de visibilidad del aviso/boton «Reconectar a Drive» (Fase 10). Pura y
+// testeable: la UI se deriva del estado REAL de conexion, nunca de "en que momento se
+// llamo a que" — asi un fallo parcial de postConexion no puede dejar el boton colgado
+// estando conectado (bug que Ari vio en campo). Sin conexion previa no se ofrece
+// reconectar: ese usuario debe conectar desde Ajustes.
+export function debeMostrarReconectar(estaConectado, huboConexionPrevia){
+  return !estaConectado && !!huboConexionPrevia;
+}
+
 let onDesconexion = null;
 export function alDesconectar(cb){ onDesconexion = cb; }
 

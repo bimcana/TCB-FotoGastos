@@ -105,6 +105,7 @@ document.addEventListener('visibilitychange', () => {
   }
   // iOS reanuda la PWA sin recargar: si el token caduco en background, renovarlo aqui.
   if (!conectado()) reconectarSilencioso();
+  else sincronizarEstadoDrive(); // sigue conectado: que no quede un aviso viejo en pantalla
 });
 
 document.getElementById('shutter').addEventListener('click', async () => {
@@ -114,8 +115,12 @@ document.getElementById('shutter').addEventListener('click', async () => {
   window.__origenAjeno = null; // una captura nueva jamas hereda el original de una ajena abandonada
   const fx = document.getElementById('flashfx');
   fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
-  // Sin deteccion en vivo: reintenta sobre el still (con rescate) y luego con la IA local.
-  let esquinas = ultimasEsquinas || detectarDocumento(canvas, 1200) || await detectarConIAConOverlay(canvas);
+  // Sin deteccion en vivo: reintenta sobre el still (con rescate), luego el rectangulo
+  // minimo (Fase 10: una factura ES un rectangulo) y por ultimo la IA local.
+  let esquinas = ultimasEsquinas
+    || detectarDocumento(canvas, 1200)
+    || await conOverlay(() => rectanguloDePapel(canvas, 1200))
+    || await detectarConIAConOverlay(canvas);
   window.__captura = { canvas, esquinas };
   procesarYRevisar();
 });
@@ -463,7 +468,8 @@ const visorRecortar = document.getElementById('visor-recortar');
 visorRecortar.addEventListener('click', () => { cerrarVisor(); ajustarEsquinas(); });
 
 import { cvReady } from './cvready.js';
-import { detectarDocumento, esEstable, nitidezRegion, tocaBorde, recorteConfiable } from './detect.js';
+import { detectarDocumento, esEstable, nitidezRegion, tocaBorde, recorteConfiable,
+         rectanguloDePapel, bandaDePapel, fraccionClara } from './detect.js';
 import { archivoACanvas } from './importar.js';
 
 // ---------- Importación en lote (Fase 2B) ----------
@@ -479,6 +485,34 @@ function actualizarBarraLote(){
     .map((_, k) => `<span class="d ${k < i ? 'hecha' : k === i ? 'actual' : ''}"></span>`).join('');
 }
 
+// Recorte de una imagen IMPORTADA de la fototeca (Fase 10, tras el fallo de campo del
+// ticket largo sobre granito). Cascada de motores, del mas preciso al mas tolerante;
+// se acepta el PRIMERO que pase `recorteConfiable`, que ahora exige forma de papel
+// (angulos ~90 y lados opuestos parecidos). Si ninguno convence, abre el editor con la
+// mejor propuesta — nunca se aplica a ciegas un recorte torcido.
+// Un recorte se aplica SOLO si convence por geometria (forma de papel) Y por contenido
+// (casi todo claro dentro). La segunda guarda es la que atrapa el fallo de campo: un
+// paralelogramo rotado con granito dentro pasaba la geometria pero no llega a 0.75 de
+// pixeles claros, asi que ahora abre el editor en vez de aplicarse a ciegas.
+const MIN_CLARO = 0.75;
+
+async function recortarImportada(canvas){
+  const ok = e => recorteConfiable(e, canvas.width, canvas.height)
+                  && fraccionClara(canvas, e) >= MIN_CLARO;
+  const clasico = detectarDocumento(canvas, 1200);
+  if (ok(clasico)) return clasico;
+  // Rectangulo minimo: una factura ES un rectangulo; robusto a bordes ondulados/rotos.
+  const rect = await conOverlay(() => rectanguloDePapel(canvas, 1200));
+  if (ok(rect)) return rect;
+  const ia = await detectarConIAConOverlay(canvas);
+  if (ok(ia)) return ia;
+  // Ultimo recurso pedido por Ari: laterales del papel extendidos al borde superior e
+  // inferior de la FOTO, inclinados segun el angulo del texto.
+  const banda = await conOverlay(() => bandaDePapel(canvas, 1200));
+  if (ok(banda)) return banda;
+  return abrirEditorEsquinas(canvas, clasico || rect || ia || banda);
+}
+
 async function cargarSiguienteDelLote(){
   const lote = window.__lote;
   if (!lote){ return; }
@@ -492,15 +526,7 @@ async function cargarSiguienteDelLote(){
   actualizarBarraLote();
   try {
     const canvas = await archivoACanvas(lote.files[lote.i]);
-    // Autorecorte: clasico (rapido) → IA local si fallo. Fase 9: una factura es siempre
-    // un papel de 4 lados (a lo sumo en perspectiva) — si el cuadrilatero detectado es
-    // CONFIABLE (recorteConfiable), se recorta SOLO, sin editor, como Adobe Scan; el
-    // editor queda para detecciones dudosas o fallidas (✂ en Revision re-ajusta).
-    let esquinas = detectarDocumento(canvas, 1200);
-    if (!esquinas) esquinas = await detectarConIAConOverlay(canvas);
-    if (!recorteConfiable(esquinas, canvas.width, canvas.height)){
-      esquinas = await abrirEditorEsquinas(canvas, esquinas);
-    }
+    const esquinas = await recortarImportada(canvas);
     window.__captura = { canvas, esquinas };
     procesarYRevisar();
   } catch(e){
@@ -814,7 +840,8 @@ modeloEl.addEventListener('click', (ev) => {
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
          buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
          listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion,
-         carpetasCompartidas, crearCarpeta, moverACarpeta, porExpirar } from './drive.js';
+         carpetasCompartidas, crearCarpeta, moverACarpeta, porExpirar,
+         debeMostrarReconectar } from './drive.js';
 import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
 import { filas606, generarXLSX606 } from './f606.js';
 
@@ -829,6 +856,10 @@ function clientIdActivo(){
 // La carpeta matriz se re-vincula por ID (duradero); si nunca se eligio una, se crea la
 // carpeta por defecto en Mi unidad. Elegir otra: Ajustes → «Elegir carpeta…».
 async function postConexion(){
+  // Lo PRIMERO: ya hay token, así que el aviso de reconectar sobra. Si algún paso de
+  // abajo falla (carpeta inaccesible, _empresa.json ilegible), el botón NO debe quedar
+  // colgado en pantalla estando conectado — ese era el bug que veía Ari (Fase 10).
+  ocultarAvisoReconectar();
   let raizId = get('carpetaRaizId');
   if (raizId){
     try { await nombreDe(raizId); } // ¿sigue existiendo y accesible?
@@ -883,6 +914,7 @@ document.getElementById('btn-conectar').addEventListener('click', async () => {
 });
 
 function mostrarAvisoReconectar(){
+  if (conectado()) return ocultarAvisoReconectar(); // nunca avisar estando conectado
   const sub = document.getElementById('gastos-sub');
   sub.textContent = 'Reconectar Google Drive ▸';
   sub.classList.add('accion');
@@ -890,6 +922,16 @@ function mostrarAvisoReconectar(){
   document.getElementById('btn-reconectar').hidden = false;
 }
 alDesconectar(mostrarAvisoReconectar);
+
+// FUENTE DE VERDAD del aviso/boton de reconexion (Fase 10): la UI se deriva SIEMPRE de
+// `conectado()`, no de "en qué momento se llamó a qué". Se invoca al abrir Gastos, al
+// volver del background y tras cada intento de conexión, así que un fallo parcial no
+// puede dejar el botón visible con Drive conectado. Si nunca hubo conexión previa, se
+// deja el texto neutro (el usuario conecta desde Ajustes).
+function sincronizarEstadoDrive(){
+  if (debeMostrarReconectar(conectado(), get('driveConectadoAntes', false))) mostrarAvisoReconectar();
+  else if (conectado()) ocultarAvisoReconectar();
+}
 
 // Reconexion en UN toque: mismo flujo que "Conectar Google Drive" de Ajustes. Con el
 // consentimiento ya dado, Google resuelve al instante (sin pantalla de permisos).
@@ -920,10 +962,10 @@ async function reconectarSilencioso(){
   if (conectado()){
     // Token restaurado de localStorage (vive ~1 h): sin popup ni permiso, directo a trabajar.
     try { if (window.google) initAuth(clientId); } catch(e){ console.warn(e); }
-    try { await postConexion(); } catch(e){ console.warn(e); mostrarAvisoReconectar(); }
+    try { await postConexion(); } catch(e){ console.warn(e); sincronizarEstadoDrive(); }
     return;
   }
-  if (!window.google){ mostrarAvisoReconectar(); return; } // GIS aun no cargo
+  if (!window.google){ sincronizarEstadoDrive(); return; } // GIS aun no cargo
   try {
     initAuth(clientId);
     await conectar({ silencioso: true });
@@ -931,7 +973,7 @@ async function reconectarSilencioso(){
     toast('Google Drive reconectado ✓');
   } catch(e){
     console.warn('Reconexion silenciosa fallo:', e.message);
-    mostrarAvisoReconectar();
+    sincronizarEstadoDrive(); // solo avisa si de verdad quedo desconectada
   }
 }
 window.addEventListener('load', () => setTimeout(reconectarSilencioso, 600));
@@ -955,7 +997,9 @@ document.addEventListener('pointerdown', () => {
     // Aun conectado: refrescar SOLO el token en silencio, sin re-inicializar la UI.
     try {
       initAuth(clientIdActivo());
-      conectar({ silencioso: true }).catch(e => console.warn('Renovacion anticipada fallo:', e.message));
+      conectar({ silencioso: true })
+        .then(sincronizarEstadoDrive)
+        .catch(e => console.warn('Renovacion anticipada fallo:', e.message));
     } catch(e){ console.warn(e); }
   } else {
     reconectarSilencioso();
@@ -1005,7 +1049,11 @@ function subirFactura(blob, datos){
                             : nombreUnico(nombreProvisional(), nombres);
     // El índice registra la fecha REALMENTE usada para archivar (fechaISO o ninguna), no el
     // texto crudo: siempre coincide con la carpeta donde quedó el archivo — trazabilidad 606.
-    const entrada = entradaDeFactura(nombre, { ...datos, fechaEmision: fechaISO }, datos.origen || 'manual', !!dup);
+    // `validadaPorUsuario` viaja en `datos` desde «Confirmar y subir» (Fase 10): con la
+    // tarjeta revisada y sin campos esenciales vacios, la factura nace COMPLETA aunque
+    // la haya leido el OCR local — el humano ya es el validador.
+    const entrada = entradaDeFactura(nombre, { ...datos, fechaEmision: fechaISO }, datos.origen || 'manual', !!dup,
+      { validadaPorUsuario: !!datos.validadaPorUsuario });
     if (datos.procesadaDesde) entrada.procesadaDesde = datos.procesadaDesde; // trazabilidad de ajenas
     if (!fechaISO){ entrada.estado = 'pendiente'; entrada.provisional = true; }
     // La entrada viaja TAMBIEN en la description del archivo (multi-usuario: si el indice
@@ -1080,7 +1128,12 @@ document.getElementById('confirm-btn').addEventListener('click', async () => {
   // Se congelan los datos ANTES del await de la subida: si el usuario edita los campos
   // mientras la factura sube, no queremos que un cambio a mitad de camino contamine
   // el registro fiscal que se está escribiendo en _gastos.json.
-  const datos = { ...(window.__datos || {}) };
+  const datos = { ...(window.__datos || {}), ...leerCampos() };
+  // El usuario esta pulsando «Confirmar y subir» con la tarjeta delante: si no falta
+  // ningun dato esencial, la factura queda validada (Fase 10, pedido de Ari) — sin
+  // etiqueta "Pendiente de revisión" ni advertencias en Gastos. Si la lectura sigue en
+  // vuelo (origen 'cargando') NO cuenta como validada: no hay nada que el usuario haya visto.
+  datos.validadaPorUsuario = datos.origen !== 'cargando';
   if (origenAjeno) datos.procesadaDesde = origenAjeno.nombre; // el origen (gemini/local/manual) lo pone el motor que leyo
   const btn = document.getElementById('confirm-btn');
   btn.disabled = true; btn.textContent = 'Subiendo…';
@@ -1423,6 +1476,7 @@ async function ejecutarAccionCarpeta(accion, sec){
 async function refrescarGastos(){
   const raizId = get('carpetaRaizId');
   const arbol = document.getElementById('gastos-arbol');
+  sincronizarEstadoDrive(); // el aviso/boton siempre refleja la conexion real
   if (!conectado() || !raizId){
     arbol.innerHTML = '<div class="gem-note">Conecta Google Drive en Ajustes.</div>';
     return;
