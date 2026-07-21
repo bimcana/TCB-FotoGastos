@@ -32,3 +32,16 @@ test('parseRespuesta con forma inválida → null', () => {
   assert.equal(parseRespuesta({}), null);
   assert.equal(parseRespuesta({ candidates: [] }), null);
 });
+
+// --- Fase 8: el prompt conoce el RNC del cliente para no confundir emisor ---
+test('cuerpoPeticion con rncCliente lo advierte en el prompt', () => {
+  const b = cuerpoPeticion('AAAA', { rncCliente: '1-33-23182-4' });
+  const texto = b.contents[0].parts[1].text;
+  assert.match(texto, /133231824/);
+  assert.match(texto, /rncEmisor/);
+});
+
+test('cuerpoPeticion sin rncCliente no agrega la advertencia', () => {
+  const b = cuerpoPeticion('AAAA');
+  assert.doesNotMatch(b.contents[0].parts[1].text, /ATENCI/);
+});

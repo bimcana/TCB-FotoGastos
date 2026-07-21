@@ -38,7 +38,7 @@ import { get, set } from './settings.js';
 import { extraerDatos, diagnosticoGemini, probarApiKey } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
 import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta, normalizarMontoTexto,
-         formatearFechaDO, formatearMonto } from './validacion.js';
+         formatearFechaDO, formatearMonto, rncValido, afinarDatosFactura } from './validacion.js';
 import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
 
 // Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
@@ -210,6 +210,28 @@ function setCamposHabilitados(hab){
 let motorPreferido = 'ia';
 let abortLectura = null;
 
+// La LECTURA no usa el filtro visual activo: cada motor recibe el estado de imagen que
+// mejor lee, calculado desde la ortofoto sin realce ('plano') con la intensidad de
+// fabrica. Gemini → auto-color (papel blanco, conserva logos/sellos); Tesseract →
+// grises normalizado (binariza mejor sin el ruido del umbral adaptativo). Si el filtro
+// visible ya es ese, se reutiliza; el resultado se cachea por captura en __resultado.
+function canvasParaLectura(motor){
+  const res = window.__resultado;
+  if (!res) return null;
+  if (!res.canvasPlano) return res.canvasFinal || res.canvasOriginal; // sin ortofoto: original completo
+  const modoLectura = motor === 'gemini' ? 'color' : 'grises';
+  const cache = res.lectura || (res.lectura = {});
+  if (!cache[modoLectura]){
+    if (res.modo === modoLectura && res.intensidad === 65 && res.canvasFinal){
+      cache[modoLectura] = res.canvasFinal;
+    } else {
+      try { cache[modoLectura] = aplicarRealce(res.canvasPlano, { modo: modoLectura, intensidad: 65 }); }
+      catch(e){ console.error(e); cache[modoLectura] = res.canvasFinal || res.canvasPlano; }
+    }
+  }
+  return cache[modoLectura];
+}
+
 function actualizarUIMotor(){
   document.getElementById('motor-ia').classList.toggle('on', motorPreferido === 'ia');
   document.getElementById('motor-ocr').classList.toggle('on', motorPreferido === 'ocr');
@@ -237,8 +259,7 @@ async function leerDatosDeFactura(){
   // sube como provisional (origen 'cargando'), nunca con metadatos de una factura anterior.
   window.__datos = { origen: 'cargando' };
   // Sin esquinas no se salta la lectura: se lee la imagen original completa.
-  const canvas = window.__resultado?.canvasFinal || window.__resultado?.canvasOriginal;
-  if (!canvas){
+  if (!window.__resultado?.canvasFinal && !window.__resultado?.canvasOriginal){
     setCamposHabilitados(true);
     origen.hidden = false; origen.textContent = 'sin imagen';
     window.__datos = { origen: 'manual' };
@@ -249,11 +270,16 @@ async function leerDatosDeFactura(){
   origen.hidden = false;
   origen.textContent = usarIA ? `Leyendo con ${ETIQUETA_MODELO[geminiModelo] || geminiModelo}…` : 'Leyendo (OCR local)…';
   setCamposHabilitados(false);
+  const rncPropio = empresaGuardada().rnc;
   let datos = null, motor = 'manual';
   try {
     if (usarIA){
       abortLectura = new AbortController();
-      try { datos = await extraerDatos(canvas, key, geminiModelo, abortLectura.signal); motor = 'gemini'; }
+      try {
+        datos = await extraerDatos(canvasParaLectura('gemini'), key, geminiModelo,
+          abortLectura.signal, { rncCliente: rncPropio });
+        motor = 'gemini';
+      }
       catch(e){
         // Cancelada (toggle a OCR, guardado o re-proceso): la nueva accion controla la UI.
         if (e.name === 'AbortError') return;
@@ -263,13 +289,14 @@ async function leerDatosDeFactura(){
         const diag = diagnosticoGemini(e.status);
         if (diag) toast(diag);
         origen.textContent = 'Leyendo (OCR local)…';
-        datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motor = 'local';
+        datos = await extraerDatosLocal(canvasParaLectura('local'), rncPropio); motor = 'local';
       } finally { abortLectura = null; }
     } else {
-      datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motor = 'local';
+      datos = await extraerDatosLocal(canvasParaLectura('local'), rncPropio); motor = 'local';
     }
   } catch(e){ console.error(e); toast('No se pudo leer la factura; escribe los datos'); datos = null; motor = 'manual'; }
   if (miGen !== genOCR) return; // llegó una lectura más nueva; ella controla los campos
+  datos = afinarDatosFactura(datos, { rncPropio }); // deduce el monto faltante y descarta el RNC propio
   setCamposHabilitados(true);
   window.__datos = { ...(datos || {}), origen: motor };
   if (datos) normalizarEnCampos(datos);
@@ -284,6 +311,8 @@ async function validarCampos(gen){
   const chips = [];
   chips.push(ncfValido(d.ncf) ? okChip('NCF válido') : warnChip('NCF a revisar'));
   chips.push(normalizarFecha(d.fechaEmision) ? okChip('Fecha OK') : warnChip('Fecha a revisar'));
+  // Digito verificador oficial del RNC/cedula: atrapa RNC mal leidos sin red ni IA.
+  chips.push(rncValido(d.rncEmisor) ? okChip('RNC verificado') : warnChip('RNC a revisar'));
   // Estado de duplicado coherente con el banner: por defecto null; solo se marca al confirmarlo.
   window.__datos.duplicadaDe = null;
   let dupText = '';
@@ -772,7 +801,7 @@ modeloEl.addEventListener('click', (ev) => {
 import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNombres, subirJPEG, leerJSON, guardarJSON, descargarImagen,
          buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
          listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion,
-         carpetasCompartidas, crearCarpeta, moverACarpeta } from './drive.js';
+         carpetasCompartidas, crearCarpeta, moverACarpeta, porExpirar } from './drive.js';
 import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
 import { filas606, generarXLSX606 } from './f606.js';
 
@@ -811,6 +840,7 @@ async function postConexion(){
   const sub = document.getElementById('gastos-sub');
   sub.textContent = 'Google Drive · conectado';
   sub.classList.remove('accion');
+  document.getElementById('btn-reconectar').hidden = true;
   refrescarGastos();
   procesarCola();
 }
@@ -837,11 +867,14 @@ function mostrarAvisoReconectar(){
   const sub = document.getElementById('gastos-sub');
   sub.textContent = 'Reconectar Google Drive ▸';
   sub.classList.add('accion');
+  // Boton explicito a la derecha del estado (pedido de Ari): solo visible desconectado.
+  document.getElementById('btn-reconectar').hidden = false;
 }
 alDesconectar(mostrarAvisoReconectar);
 
-// El subtitulo de Gastos es tocable cuando hay que reconectar (sin pasar por Ajustes).
-document.getElementById('gastos-sub').addEventListener('click', async () => {
+// Reconexion en UN toque: mismo flujo que "Conectar Google Drive" de Ajustes. Con el
+// consentimiento ya dado, Google resuelve al instante (sin pantalla de permisos).
+async function reconectarConGesto(){
   if (conectado()) return;
   const clientId = clientIdActivo();
   if (!clientId) return toast('Pega tu Client ID de Google en Ajustes');
@@ -851,7 +884,11 @@ document.getElementById('gastos-sub').addEventListener('click', async () => {
     await postConexion();
     toast('Google Drive conectado');
   } catch(e){ console.error(e); toast('No se pudo conectar: ' + e.message); }
-});
+}
+
+// El subtitulo de Gastos es tocable cuando hay que reconectar (sin pasar por Ajustes).
+document.getElementById('gastos-sub').addEventListener('click', reconectarConGesto);
+document.getElementById('btn-reconectar').addEventListener('click', reconectarConGesto);
 
 // Al abrir la app: si ya hubo consentimiento antes, renovar el acceso sin molestar.
 // Google lo permite con prompt:'' mientras la sesion siga viva; si exige interaccion
@@ -885,12 +922,23 @@ window.addEventListener('load', () => setTimeout(reconectarSilencioso, 600));
 // de verdad exige interaccion.
 let _ultimoIntentoRenovar = 0;
 document.addEventListener('pointerdown', () => {
-  if (conectado()) return;
+  // Fase 8: tambien renueva PROACTIVAMENTE cuando el token esta por expirar (<5 min):
+  // asi la app casi nunca llega a estar "desconectada" mientras se usa.
+  const porRenovar = !conectado() || porExpirar();
+  if (!porRenovar) return;
   if (!get('driveConectadoAntes', false) || !clientIdActivo() || !window.google) return;
   const ahora = Date.now();
   if (ahora - _ultimoIntentoRenovar < 30000) return;
   _ultimoIntentoRenovar = ahora;
-  reconectarSilencioso();
+  if (conectado()){
+    // Aun conectado: refrescar SOLO el token en silencio, sin re-inicializar la UI.
+    try {
+      initAuth(clientIdActivo());
+      conectar({ silencioso: true }).catch(e => console.warn('Renovacion anticipada fallo:', e.message));
+    } catch(e){ console.warn(e); }
+  } else {
+    reconectarSilencioso();
+  }
 }, true);
 
 // Confirmar y subir + pantalla Gastos (Task 10)
@@ -1635,9 +1683,10 @@ async function leerConIAAhora(motor = 'auto'){
     if (!blob) return toast('No se encontró la imagen de la factura');
     const canvas = await archivoACanvas(blob);
     const key = get('geminiKey', '');
+    const rncPropio = empresaGuardada().rnc;
     let datos = null, motorUsado = null;
     if (key && motor !== 'ocr'){
-      try { datos = await extraerDatos(canvas, key, geminiModelo); motorUsado = 'gemini'; }
+      try { datos = await extraerDatos(canvas, key, geminiModelo, undefined, { rncCliente: rncPropio }); motorUsado = 'gemini'; }
       catch(e){
         console.error(e);
         const diag = diagnosticoGemini(e.status);
@@ -1645,10 +1694,11 @@ async function leerConIAAhora(motor = 'auto'){
       }
     }
     if (!datos){
-      try { datos = await extraerDatosLocal(canvas, empresaGuardada().rnc); motorUsado = 'local'; }
+      try { datos = await extraerDatosLocal(canvas, rncPropio); motorUsado = 'local'; }
       catch(e){ console.error(e); }
     }
     if (!datos) return toast('Sin conexión y sin OCR disponible — intenta luego');
+    datos = afinarDatosFactura(datos, { rncPropio }); // deduce el monto faltante y descarta el RNC propio
     const res = await actualizarEntradaConReArchivo(ctx.mesId, archivo, f => {
       for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'itbis', 'total']){
         if (datos[c] != null && datos[c] !== '') f[c] = datos[c];

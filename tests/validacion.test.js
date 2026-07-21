@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ncfValido, normalizarFecha, montoValido, buscarDuplicado, facturaCompleta, estadoFactura, normalizarMontoTexto, formatearFechaDO, formatearMonto } from '../src/validacion.js';
+import { ncfValido, normalizarFecha, montoValido, buscarDuplicado, facturaCompleta, estadoFactura, normalizarMontoTexto, formatearFechaDO, formatearMonto,
+         rncValido, deducirMontos, afinarDatosFactura } from '../src/validacion.js';
 
 test('NCF serie B válido', () => { assert.equal(ncfValido('B0100182291'), true); });
 test('NCF serie E válido', () => { assert.equal(ncfValido('E310000083906'), true); });
@@ -97,4 +98,88 @@ test('formatearMonto: miles con coma y 2 decimales', () => {
 test('ida y vuelta: lo mostrado se vuelve a leer igual', () => {
   assert.equal(normalizarMontoTexto(formatearMonto(2500)), 2500);
   assert.equal(normalizarFecha(formatearFechaDO('2026-07-17')), '2026-07-17');
+});
+
+// --- Fase 8: digito verificador de RNC/cedula (sin red, sin IA) ---
+
+test('rncValido: RNC juridicos reales (mod 11)', () => {
+  assert.equal(rncValido('101796822'), true);   // Grupo Ramos (voucher Sirena)
+  assert.equal(rncValido('1-33-23182-4'), true); // BIMCANA SRL, con guiones
+  assert.equal(rncValido('133231824'), true);
+});
+
+test('rncValido: un digito cambiado (error tipico de OCR) falla', () => {
+  assert.equal(rncValido('101796823'), false);
+  assert.equal(rncValido('102796822'), false);
+  assert.equal(rncValido('131231824'), false);
+});
+
+test('rncValido: largos invalidos, vacio y basura', () => {
+  assert.equal(rncValido(''), false);
+  assert.equal(rncValido(null), false);
+  assert.equal(rncValido('12345'), false);
+  assert.equal(rncValido('sin numeros'), false);
+});
+
+test('rncValido: cedula de 11 digitos (Luhn)', () => {
+  // Cedula sintetica con digito verificador correcto segun la variante Luhn
+  const base = '00112345678'.slice(0, 10);
+  let suma = 0;
+  for (let i = 0; i < 10; i++){
+    let p = Number(base[i]) * (i % 2 === 0 ? 1 : 2);
+    if (p > 9) p -= 9;
+    suma += p;
+  }
+  const dv = (10 - (suma % 10)) % 10;
+  assert.equal(rncValido(base + dv), true);
+  assert.equal(rncValido(base + ((dv + 1) % 10)), false);
+});
+
+// --- Fase 8: deduccion de montos (total = subtotal + itbis) ---
+
+test('deducirMontos: total desde subtotal + itbis', () => {
+  const d = deducirMontos({ subtotal: 2910, itbis: 523.8, total: null });
+  assert.equal(d.total, 3433.8);
+});
+
+test('deducirMontos: subtotal desde total - itbis', () => {
+  const d = deducirMontos({ subtotal: null, itbis: 523.8, total: 3433.8 });
+  assert.equal(d.subtotal, 2910);
+});
+
+test('deducirMontos: itbis desde total - subtotal', () => {
+  const d = deducirMontos({ subtotal: 2910, itbis: null, total: 3433.8 });
+  assert.equal(d.itbis, 523.8);
+});
+
+test('deducirMontos: no pisa valores ya leidos', () => {
+  const d = deducirMontos({ subtotal: 100, itbis: 18, total: 200 });
+  assert.equal(d.total, 200); // aunque no cuadre, el valor leido manda (el usuario revisa)
+});
+
+test('deducirMontos: resultado negativo se descarta', () => {
+  const d = deducirMontos({ subtotal: 500, itbis: null, total: 300 });
+  assert.equal(d.itbis, null);
+});
+
+test('deducirMontos: con solo un monto no inventa nada', () => {
+  const d = deducirMontos({ subtotal: null, itbis: null, total: 300 });
+  assert.equal(d.subtotal, null);
+  assert.equal(d.itbis, null);
+});
+
+// --- Fase 8: post-proceso comun de lectura ---
+
+test('afinarDatosFactura: descarta el RNC propio y deduce el monto faltante', () => {
+  const d = afinarDatosFactura(
+    { rncEmisor: '133231824', subtotal: 100, itbis: 18, total: null },
+    { rncPropio: '1-33-23182-4' });
+  assert.equal(d.rncEmisor, null);
+  assert.equal(d.total, 118);
+});
+
+test('afinarDatosFactura: RNC ajeno se conserva; null pasa de largo', () => {
+  const d = afinarDatosFactura({ rncEmisor: '101796822', total: 50 }, { rncPropio: '133231824' });
+  assert.equal(d.rncEmisor, '101796822');
+  assert.equal(afinarDatosFactura(null), null);
 });

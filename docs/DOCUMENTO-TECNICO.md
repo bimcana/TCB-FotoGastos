@@ -24,11 +24,11 @@ y el Excel Formato 606. Multi-usuario sobre una carpeta compartida. La versión 
 | `camera.js` | getUserMedia + captura de frame | no |
 | `detect.js` | detección clásica en cascada (Otsu→adaptativa→Canny), `esquinasDeMascara`, helpers | helpers sí |
 | `detectia.js` | U²-Net-p con ONNX Runtime WASM (carga perezosa) | no |
-| `esquinas.js` | editor de esquinas a pantalla completa con lupa | no |
+| `esquinas.js` | editor de esquinas a pantalla completa con lupa; handles laterales (`puntosMedios`/`desplazarLado` puros) | helpers sí |
 | `process.js`/`enhance.js` | ortofoto (warp) + auto-color/filtros | parcial |
 | `gemini.js` | extracción con Gemini (+`diagnosticoGemini`, `probarApiKey`) | parseo sí |
 | `ocrlocal.js` | Tesseract + `parsearTextoFactura(texto, {rncPropio})` | parser sí |
-| `validacion.js` | NCF/fechas/montos: `normalizarFecha`, `normalizarMontoTexto`, `facturaCompleta`, `estadoFactura`, `buscarDuplicado` | sí |
+| `validacion.js` | NCF/fechas/montos: `normalizarFecha`, `normalizarMontoTexto`, `facturaCompleta`, `estadoFactura`, `buscarDuplicado`, `rncValido` (dígito verificador DGII), `deducirMontos`, `afinarDatosFactura` | sí |
 | `naming.js` | `Compra_DDN`, provisionales, `necesitaReArchivo`, `mesesDeCarpetas` | sí |
 | `indice.js` | `_gastos.json` + **`descDeEntrada`/`entradaDeDesc`/`conciliarIndice`** | sí |
 | `drive.js` | API Drive v3: token persistente, picker de carpetas, papelera, description | no |
@@ -102,6 +102,21 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
 - **Token de Drive**: vive 60 min (límite de Google sin backend). Renovación: al cargar
   (silenciosa; iOS puede bloquearla sin gesto) y en el PRIMER `pointerdown` del usuario
   (throttle 30 s) — no quitar ese listener: es lo que evita el "No conectada" tras 1 h.
+  Fase 8: el mismo listener renueva PROACTIVAMENTE si el token expira en <5 min
+  (`porExpirar` en drive.js) — refresca solo el token, sin `postConexion`. Botón
+  `#btn-reconectar` («Reconectar a Drive») en el encabezado de Gastos: visible solo
+  desconectado (lo muestra `mostrarAvisoReconectar`, lo oculta `postConexion`); mismo
+  flujo de un toque que el subtítulo tocable (`reconectarConGesto`).
+- **Lectura Fase 8 (calidad de OCR/IA)**: la lectura NO usa el filtro visual activo —
+  `canvasParaLectura(motor)` en main.js da a cada motor su mejor estado de imagen desde
+  `canvasPlano` con intensidad 65: Gemini → 'color' (auto-color), Tesseract → 'grises';
+  cacheado por captura en `__resultado.lectura`. TODO resultado de motor pasa por
+  `afinarDatosFactura` (validacion.js): descarta el RNC del comprador (perfil Empresa) y
+  deduce el monto faltante (total = subtotal + itbis) sin pisar valores leídos. El chip
+  «RNC verificado» usa `rncValido` (dígito verificador mod-11/Luhn — la consulta EN LÍNEA
+  a DGII no es viable desde una PWA estática: WebForms sin CORS, web service móvil
+  retirado; verificado 2026-07-21). El prompt de Gemini recibe `rncCliente` y reglas de
+  nombreComercio (texto grande/logo, razón social preferida, nunca la dirección).
 - **Carpetas en Gastos (Fase 7)**: deslizar el encabezado a la izquierda revela acciones
   según `accionesCarpeta({nombre, vacia, hoyISOStr})` (naming.js, puro): vacía →
   `['archivar','eliminar']`; mes ACTUAL con facturas → `[]`; resto → `['archivar']`.
