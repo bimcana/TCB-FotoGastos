@@ -14,15 +14,12 @@ y el Excel Formato 606. Multi-usuario sobre una carpeta compartida. La versión 
 (repo hermano `TCB-FotoGastos-Lite`) solo alimenta la carpeta; esta Full procesa.
 
 - Producción: `https://bimcana.github.io/TCB-FotoGastos/` · repo `bimcana/TCB-FotoGastos`
-- Ramas: trabajo en `faseN` → merge --no-ff a `main` → `gh-pages` se fuerza a `main` y se empuja.
-- **Rama que publica cada app** (verificado por API 2026-07-21 — NO asumir que son
-  iguales): la **Full desde `main`**, la **Lite desde `gh-pages`**. Funcionalmente da lo
-  mismo (idéntico pipeline, misma URL, misma velocidad); la diferencia es de higiene
-  operativa. **INVARIANTE que hace irrelevante la diferencia: empujar SIEMPRE las dos
-  ramas al mismo commit** (`git push origin main` + `git branch -f gh-pages main` +
-  `git push origin gh-pages`). Así la publicación funciona sea cual sea la configuración,
-  y nadie tiene que recordar cuál es cuál. Mejora pendiente de Ari (Settings → Pages):
-  poner la Lite también en `main` y borrar `gh-pages` en ambos → una sola rama, sin ritual.
+- Ramas: trabajo en `faseN` → merge --no-ff a `main`. **`git push origin main` = publicar.**
+- **Pages publica desde `main` (root) en AMBAS apps** (unificado 2026-07-21; la Lite estaba
+  en `gh-pages`). La rama `gh-pages` fue **borrada en los dos repos**: no hay paso de
+  compilación (el contenido del repo *es* el sitio), así que una segunda rama solo añadía
+  un ritual de sincronización y una fuente de errores — ya provocó uno (ver §4.2).
+  **No volver a crear `gh-pages`.**
 
 ## 2. Mapa de módulos (src/)
 
