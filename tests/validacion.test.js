@@ -15,6 +15,13 @@ test('normalizarFecha ISO', () => { assert.equal(normalizarFecha('2025-06-11'), 
 test('normalizarFecha DD/MM/AAAA', () => { assert.equal(normalizarFecha('11/06/2025'), '2025-06-11'); });
 test('normalizarFecha español "11 jun. 2025"', () => { assert.equal(normalizarFecha('11 jun. 2025'), '2025-06-11'); });
 test('normalizarFecha basura → null', () => { assert.equal(normalizarFecha('no es fecha'), null); });
+// Fase 10: formato de la factura de Punta Cana BM Cargo — AAAA.MM.DD con puntos.
+test('normalizarFecha ISO con punto o barra (2026.07.11 / 2026/07/11)', () => {
+  assert.equal(normalizarFecha('2026.07.11'), '2026-07-11');
+  assert.equal(normalizarFecha('2026/07/11'), '2026-07-11');
+  assert.equal(normalizarFecha('2026.7.1'), '2026-07-01');
+  assert.equal(normalizarFecha('11.07.2026'), '2026-07-11'); // DD.MM.AAAA sigue igual
+});
 test('montoValido', () => {
   assert.equal(montoValido(3724.80), true);
   assert.equal(montoValido(-1), false);
@@ -56,6 +63,19 @@ test('estadoFactura: completos + origen local → pendiente', () => {
 });
 test('estadoFactura: falta un esencial (total) → incompleta aunque origen sea gemini', () => {
   assert.equal(estadoFactura({ ...DATOS_COMPLETOS, total: null }, 'gemini'), 'incompleta');
+});
+
+// --- Fase 10: «Confirmar y subir» con la tarjeta revisada = factura validada ---
+// Con el OCR local como motor por defecto (Fase 9), marcar 'pendiente' todo lo capturado
+// llenaba Gastos de avisos aunque el usuario ya hubiera revisado los campos.
+test('estadoFactura: OCR local CONFIRMADO por el usuario → completa (sin advertencias)', () => {
+  assert.equal(estadoFactura(DATOS_COMPLETOS, 'local'), 'pendiente'); // sin confirmar
+  assert.equal(estadoFactura(DATOS_COMPLETOS, 'local', { validadaPorUsuario: true }), 'completa');
+});
+
+test('estadoFactura: confirmar NO tapa un campo esencial vacio', () => {
+  assert.equal(estadoFactura({ ...DATOS_COMPLETOS, ncf: null }, 'local', { validadaPorUsuario: true }), 'incompleta');
+  assert.equal(estadoFactura({ ...DATOS_COMPLETOS, rncEmisor: null }, 'gemini', { validadaPorUsuario: true }), 'incompleta');
 });
 
 // --- Fase 5: entrada tipo Excel (el campo corrige lo que el usuario quiso escribir) ---

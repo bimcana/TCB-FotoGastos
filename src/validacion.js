@@ -14,7 +14,10 @@ export function normalizarFecha(str){
   let s = str.trim().toLowerCase();
   s = s.replace(/^[a-záéíóú]{3,4}[.,]\s*/i, ''); // "vie," / "lun." delante de la fecha
   let m;
-  if ((m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/))) return `${m[1]}-${m[2]}-${m[3]}`;
+  // AAAA-MM-DD y tambien AAAA.MM.DD / AAAA/MM/DD (Fase 10: la factura de Punta Cana BM
+  // Cargo imprime «FECHA 2026.07.11» y la fecha se perdia por no aceptar el punto).
+  if ((m = s.match(/^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})$/)))
+    return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
   if ((m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{2,4})$/)))
     return `${anio4(m[3])}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
   if ((m = s.match(/^(\d{1,2})[\s\/\-.]+([a-záéíóú]{3,4})\.?[\s\/\-.]+(\d{2,4})$/))){
@@ -130,9 +133,17 @@ export function facturaCompleta(datos){
   return !!(normalizarFecha(datos.fechaEmision) && datos.ncf && datos.rncEmisor && montoValido(datos.total));
 }
 
-export function estadoFactura(datos, origen){
+// Fase 10 (pedido de Ari): si el usuario pulsó «Confirmar y subir» con la tarjeta a la
+// vista y no falta ningún dato esencial, la factura queda VALIDADA — sin advertencias.
+// El estado 'pendiente' existía porque el OCR local era el respaldo de la IA; desde
+// que el OCR es el motor por defecto (Fase 9), marcar como pendiente TODO lo capturado
+// llenaba Gastos de avisos aunque el humano ya hubiera revisado los campos.
+// `pendiente` queda solo para lo que NADIE ha validado: provisionales y lo que rellena
+// «Leer con IA» a la espera de confirmación.
+export function estadoFactura(datos, origen, opciones = {}){
   if (!facturaCompleta(datos)) return 'incompleta';
-  if (origen === 'local') return 'pendiente'; // OCR local: menos confiable, a verificar con Gemini
+  if (opciones.validadaPorUsuario) return 'completa'; // el humano la vio y la confirmó
+  if (origen === 'local') return 'pendiente'; // OCR local sin revisar: a verificar
   return 'completa'; // gemini o manual con esenciales
 }
 

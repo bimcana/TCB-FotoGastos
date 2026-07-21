@@ -6,7 +6,8 @@ const RE_RNC_CONTEXTO = /rnc/i;
 const RE_CLIENTE = /cliente/i;
 const RE_EXCLUIR_FECHA = /v[aá]lido|vence|vencimiento|l[ií]mite|limite/i;
 const RE_FECHA_CONTEXTO = /fecha|emisi[oó]n/i;
-const RE_FECHA_ISO = /\d{4}-\d{2}-\d{2}/;
+// ISO con guion, punto o barra: «2026-07-11», «2026.07.11» (Punta Cana BM Cargo), «2026/07/11».
+const RE_FECHA_ISO = /\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}/;
 const RE_FECHA_SLASH = /(?<!\d)\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}(?!\d)/;
 const RE_FECHA_ES = /\d{1,2}[\s/\-.]+[a-záéíóú]{3,4}\.?[\s/\-.]+\d{2,4}/i;
 const RE_MONTO = /\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{1,2})?|\d+[.,]\d{1,2}|\d+/g;

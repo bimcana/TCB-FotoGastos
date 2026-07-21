@@ -154,6 +154,30 @@ TOTAL 500.00`;
   assert.equal(parsearTextoFactura(t).nombreComercio, 'FERRETERIA EL MARTILLO');
 });
 
+// Fase 10: factura real de Ari (Punta Cana BM Cargo) — fecha AAAA.MM.DD y "VALIDA HASTA".
+test('factura Punta Cana BM Cargo: fecha 2026.07.11, no la de validez', () => {
+  const t = `PUNTA CANA BM CARGO SRL
+DO - PUNTA CANA
+Rnc 131642918
+BIMCANA
+RNC 1-33-23182-4
+FACTURA   FT32-371202
+FECHA     2026.07.11
+NCF       B0100033899
+VALIDA HASTA 2026.12.31
+SUB-TOTAL 1212.45
+ITBIS      151.04
+TOTAL     1363.49`;
+  const d = parsearTextoFactura(t, { rncPropio: '1-33-23182-4' });
+  assert.equal(d.fechaEmision, '2026-07-11');
+  assert.equal(d.ncf, 'B0100033899');
+  assert.equal(d.rncEmisor, '131642918');       // el del emisor, no el de BIMCANA
+  assert.equal(d.nombreComercio, 'PUNTA CANA BM CARGO SRL');
+  assert.equal(d.subtotal, 1212.45);
+  assert.equal(d.itbis, 151.04);
+  assert.equal(d.total, 1363.49);
+});
+
 test('total pelado sigue funcionando cuando no hay etiqueta fuerte', () => {
   const t = 'COMERCIO X\nSUB-TOTAL 100.00\nTOTAL 118.00';
   assert.equal(parsearTextoFactura(t).total, 118);

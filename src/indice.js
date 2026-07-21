@@ -1,6 +1,8 @@
 import { estadoFactura, buscarDuplicado } from './validacion.js';
 
-export function entradaDeFactura(nombreArchivo, datos, origen, duplicada){
+// opciones.validadaPorUsuario: la subida viene de «Confirmar y subir» con el usuario
+// mirando la tarjeta (Fase 10) → si no falta nada esencial, la factura nace completa.
+export function entradaDeFactura(nombreArchivo, datos, origen, duplicada, opciones = {}){
   return {
     archivo: nombreArchivo,
     fechaEmision: datos.fechaEmision ?? null,
@@ -13,7 +15,7 @@ export function entradaDeFactura(nombreArchivo, datos, origen, duplicada){
     origen: origen || 'manual',
     duplicada: !!duplicada,
     subidoEn: new Date().toISOString(),
-    estado: estadoFactura(datos, origen),
+    estado: estadoFactura(datos, origen, opciones),
     revisadaIA: false
   };
 }
