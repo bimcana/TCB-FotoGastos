@@ -7,7 +7,35 @@ test('entradaDeFactura: propaga validadaPorUsuario al estado (Fase 10)', () => {
   assert.equal(_entradaF10('Compra_110.jpg', d, 'local', false).estado, 'pendiente');
   assert.equal(_entradaF10('Compra_110.jpg', d, 'local', false, { validadaPorUsuario: true }).estado, 'completa');
 });
-import { entradaDeFactura, agregarEntrada, quitarEntrada, descDeEntrada, entradaDeDesc, conciliarIndice } from '../src/indice.js';
+import { entradaDeFactura, agregarEntrada, quitarEntrada, descDeEntrada, entradaDeDesc, conciliarIndice, repiteNCF } from '../src/indice.js';
+
+// --- Fase 12: deteccion de duplicado al leer el NCF de una factura (tipico de Lite) ---
+const IDX_DUP = { facturas: [
+  { archivo: 'Compra_100.jpg', ncf: 'B0100077145', duplicada: false },
+  { archivo: 'Compra_101.jpg', ncf: 'E310000001', duplicada: false }
+]};
+
+test('repiteNCF: la nueva copia repite un NCF existente → true', () => {
+  assert.equal(repiteNCF(IDX_DUP, 'B0100077145', 'Pendiente_x.jpg'), true);
+});
+test('repiteNCF: NCF nuevo → false', () => {
+  assert.equal(repiteNCF(IDX_DUP, 'B0100099999', 'Pendiente_x.jpg'), false);
+});
+test('repiteNCF: excluye la propia factura (no se marca a si misma)', () => {
+  assert.equal(repiteNCF(IDX_DUP, 'B0100077145', 'Compra_100.jpg'), false);
+});
+test('repiteNCF: el original NO se marca cuando la otra ya es duplicada', () => {
+  const idx = { facturas: [
+    { archivo: 'Compra_100.jpg', ncf: 'B0100077145', duplicada: false }, // original
+    { archivo: 'Compra_105.jpg', ncf: 'B0100077145', duplicada: true }   // copia ya marcada
+  ]};
+  assert.equal(repiteNCF(idx, 'B0100077145', 'Compra_100.jpg'), false); // editar el original no lo marca
+});
+test('repiteNCF: sin NCF o indice vacio → false', () => {
+  assert.equal(repiteNCF(IDX_DUP, null, 'x.jpg'), false);
+  assert.equal(repiteNCF({ facturas: [] }, 'B0100077145', 'x.jpg'), false);
+  assert.equal(repiteNCF(null, 'B0100077145', 'x.jpg'), false);
+});
 
 test('descDeEntrada/entradaDeDesc: ida y vuelta con version', () => {
   const e = { archivo: 'Compra_031.jpg', fechaEmision: '2025-06-03', ncf: 'B0100182291', rncEmisor: '131067603',

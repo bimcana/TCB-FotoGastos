@@ -43,3 +43,14 @@ test('debeMostrarReconectar: solo desconectado Y con conexion previa', async () 
   assert.equal(d.debeMostrarReconectar(false, true), true);   // caso del aviso
   assert.equal(d.debeMostrarReconectar(false, false), false); // nunca conecto: va a Ajustes
 });
+
+// Fase 12: clasificar el 403 de Drive para caer al plan B al borrar una factura de Lite.
+test('esErrorDePermiso: reconoce 403 / insufficientFilePermissions y descarta el resto', async () => {
+  const d = await conAlmacen(null);
+  assert.equal(d.esErrorDePermiso(new Error('Drive 403: {"error":{"code":403,"reason":"insufficientFilePermissions"}}')), true);
+  assert.equal(d.esErrorDePermiso(new Error('insufficientFilePermissions')), true);
+  assert.equal(d.esErrorDePermiso(new Error('Drive 404: no existe')), false);
+  assert.equal(d.esErrorDePermiso(new Error('Drive 401: token vencido')), false);
+  assert.equal(d.esErrorDePermiso(null), false);
+  assert.equal(d.esErrorDePermiso(new Error('fallo de red')), false);
+});

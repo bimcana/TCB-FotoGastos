@@ -73,12 +73,22 @@ const statusTxt = document.getElementById('cam-status-txt');
 // Ajuste "Cámara": con camaraAuto=false la cámara NO se enciende (ni dispara el aviso
 // de permiso de iOS) hasta que el usuario la pida tocando el estado en pantalla.
 // El aviso en sí es del sistema: la web no puede suprimirlo, solo pedir menos veces.
+// Pantalla de camara apagada: logo TCB + descripcion + "Tocar en pantalla…". Al mostrarla
+// se oculta el estado (pill) para no duplicar mensajes; al arrancar se invierte.
+const camIdle = document.getElementById('cam-idle');
+function mostrarIdleCamara(mostrar){
+  camIdle.hidden = !mostrar;
+  document.getElementById('cam-status').style.display = mostrar ? 'none' : '';
+}
+
 function arrancarCamara(){
+  mostrarIdleCamara(false);
   statusTxt.textContent = 'Iniciando cámara…';
   iniciarCamara(video)
     .then(() => { statusTxt.textContent = 'Buscando documento…'; })
     .catch(err => {
       statusTxt.textContent = 'Sin acceso a la cámara';
+      mostrarIdleCamara(true); // volver a la pantalla tocable si el permiso fallo
       toast('Permite el acceso a la cámara para capturar facturas');
       console.error(err);
     });
@@ -86,8 +96,10 @@ function arrancarCamara(){
 if (get('camaraAuto', true)){
   arrancarCamara();
 } else {
-  statusTxt.textContent = 'Toca aquí para activar la cámara';
+  mostrarIdleCamara(true);
 }
+// Tocar la pantalla (o el estado) enciende la camara si esta apagada.
+camIdle.addEventListener('click', arrancarCamara);
 document.getElementById('cam-status').addEventListener('click', () => {
   const track = video.srcObject && video.srcObject.getVideoTracks()[0];
   if (!track || track.readyState === 'ended') arrancarCamara();
@@ -97,11 +109,17 @@ document.getElementById('cam-status').addEventListener('click', () => {
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible') return;
   const track = video.srcObject && video.srcObject.getVideoTracks()[0];
-  if ((!track || track.readyState === 'ended') && get('camaraAuto', true)){
-    iniciarCamara(video).catch(err => {
-      statusTxt.textContent = 'Sin acceso a la cámara';
-      console.error(err);
-    });
+  if (!track || track.readyState === 'ended'){
+    if (get('camaraAuto', true)){
+      mostrarIdleCamara(false);
+      iniciarCamara(video).catch(err => {
+        statusTxt.textContent = 'Sin acceso a la cámara';
+        mostrarIdleCamara(true);
+        console.error(err);
+      });
+    } else {
+      mostrarIdleCamara(true); // "Solo al tocar": volver a la pantalla tocable
+    }
   }
   // iOS reanuda la PWA sin recargar: si el token caduco en background, renovarlo aqui.
   if (!conectado()) reconectarSilencioso();
@@ -852,7 +870,7 @@ import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNo
          buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
          listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion,
          carpetasCompartidas, crearCarpeta, moverACarpeta, porExpirar,
-         debeMostrarReconectar } from './drive.js';
+         debeMostrarReconectar, esErrorDePermiso, quitarDeCarpeta } from './drive.js';
 import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
 import { filas606, generarXLSX606 } from './f606.js';
 
@@ -1027,7 +1045,7 @@ import { encolar, pendientes, eliminar, cuenta } from './queue.js';
 
 // Índice _gastos.json por mes (Task 5): archiva por fecha de EMISIÓN (con respaldo a
 // la fecha del dispositivo), registra metadatos y marca duplicados sin bloquear la subida.
-import { agregarEntrada, entradaDeFactura, quitarEntrada, descDeEntrada, conciliarIndice } from './indice.js';
+import { agregarEntrada, entradaDeFactura, quitarEntrada, descDeEntrada, conciliarIndice, repiteNCF } from './indice.js';
 
 function refrescarGastosSiVisible(){
   if (document.getElementById('scr-gastos').classList.contains('active')) refrescarGastos();
@@ -1088,6 +1106,16 @@ function subirFactura(blob, datos){
 // en Drive y transfiere la entrada al indice del mes destino. Orden seguro: primero el
 // archivo, despues los indices; driveId hace la operacion re-ejecutable si algo falla a
 // mitad. Devuelve null si la entrada ya no existe.
+// Fase 12: marca `entrada.duplicada` si OTRA factura (que no sea ella misma ni una ya
+// marcada como duplicada) comparte su NCF. Excluir a la ya-duplicada evita marcar el
+// ORIGINAL (y con ello sacarlo del 606). Nunca desmarca: preserva el estilo de subida.
+// Clave para las facturas de Lite: llegan como provisionales SIN NCF, y el NCF solo se
+// conoce al leerlas con IA — momento en que hay que re-chequear el duplicado.
+function marcarSiDuplicada(entrada, indice, archivoExcluir){
+  if (entrada.duplicada) return;
+  if (repiteNCF(indice, entrada.ncf, archivoExcluir)) entrada.duplicada = true;
+}
+
 function actualizarEntradaConReArchivo(mesId, archivo, mutador){
   return conLockIndice(async () => {
     const idx = await leerJSON(mesId, '_gastos.json');
@@ -1098,6 +1126,7 @@ function actualizarEntradaConReArchivo(mesId, archivo, mutador){
     if (fechaISO) f.fechaEmision = fechaISO;
     const carpetaActual = await nombreDe(mesId);
     if (!fechaISO || !necesitaReArchivo(archivo, carpetaActual, fechaISO)){
+      marcarSiDuplicada(f, idx, archivo); // NCF recien leido: ¿ya existe en este mes?
       await guardarJSON(mesId, '_gastos.json', idx);
       // Mantener los metadatos que viajan con el archivo (mejor esfuerzo).
       try {
@@ -1117,10 +1146,12 @@ function actualizarEntradaConReArchivo(mesId, archivo, mutador){
     delete entradaFinal.provisional;
     await moverYRenombrar(fileId, nombreFinal, destinoId, mesId, descDeEntrada(entradaFinal));
     if (destinoId === mesId){
-      await guardarJSON(mesId, '_gastos.json', agregarEntrada(quitarEntrada(idx, archivo), entradaFinal));
+      const idxSinVieja = quitarEntrada(idx, archivo);
+      marcarSiDuplicada(entradaFinal, idxSinVieja, entradaFinal.archivo); // re-archivo en el mismo mes
+      await guardarJSON(mesId, '_gastos.json', agregarEntrada(idxSinVieja, entradaFinal));
     } else {
       const idxDest = await leerJSON(destinoId, '_gastos.json');
-      entradaFinal.duplicada = entradaFinal.duplicada || !!buscarDuplicado(idxDest, entradaFinal.ncf);
+      marcarSiDuplicada(entradaFinal, idxDest, entradaFinal.archivo); // duplicado en la carpeta destino
       await guardarJSON(destinoId, '_gastos.json', agregarEntrada(idxDest, entradaFinal));
       await guardarJSON(mesId, '_gastos.json', quitarEntrada(idx, archivo));
     }
@@ -1341,10 +1372,20 @@ function filaFactura(ctx, e, nombre){
 // fuera del indice (bajo el mutex) y de la cola local de revision si estaba ahi.
 async function eliminarFactura(ctx, e, nombre){
   const etiqueta = e ? (e.duplicada ? 'duplicada' : e.estado) : 'sin procesar';
-  if (!confirm(`¿Eliminar «${nombre}» (${etiqueta})? La imagen irá a la papelera de Drive.`)) return;
+  if (!confirm(`¿Eliminar «${nombre}» (${etiqueta})? Se quitará de tus Gastos.`)) return;
   try {
     const fileId = (e && e.driveId) || ctx.idPorNombre?.get(nombre) || await buscarArchivo(ctx.mesId, nombre);
-    if (fileId) await moverAPapelera(fileId);
+    let via = 'papelera';
+    if (fileId){
+      try {
+        await moverAPapelera(fileId);
+      } catch(err){
+        // La subio otra cuenta (Lite): su dueño es esa persona y no podemos mandarla a
+        // NUESTRA papelera (403). Plan B: como dueños de la carpeta, la sacamos de ella.
+        if (esErrorDePermiso(err) && ctx.mesId){ await quitarDeCarpeta(fileId, ctx.mesId); via = 'carpeta'; }
+        else throw err;
+      }
+    }
     if (e){
       await conLockIndice(async () => {
         const idx = await leerJSON(ctx.mesId, '_gastos.json');
@@ -1355,7 +1396,9 @@ async function eliminarFactura(ctx, e, nombre){
         if (item) await eliminarRevision(item.id);
       } catch(err){ console.error(err); }
     }
-    toast(`«${nombre}» eliminada — recuperable en la papelera de Drive`);
+    toast(via === 'papelera'
+      ? `«${nombre}» eliminada — recuperable en la papelera de Drive`
+      : `«${nombre}» quitada de Gastos (la subió otra cuenta; su copia queda en el Drive de origen)`);
     refrescarGastos();
   } catch(err){ console.error(err); toast('No se pudo eliminar: ' + err.message); }
 }
@@ -1797,7 +1840,9 @@ async function leerConIAAhora(motor = 'auto'){
     rvArchivo = res.nombreFinal;
     rellenarPanel(res.entrada);
     refrescarGastos();
-    toast(motorUsado === 'local' ? 'Datos leídos con OCR — revisa bien y confirma' : 'Datos leídos — revisa y confirma');
+    // El NCF recien leido puede repetir uno ya registrado (tipico de las de Lite): avisarlo claro.
+    if (res.entrada?.duplicada) toast(`⚠ Factura DUPLICADA — el NCF ${res.entrada.ncf} ya está registrado`);
+    else toast(motorUsado === 'local' ? 'Datos leídos con OCR — revisa bien y confirma' : 'Datos leídos — revisa y confirma');
   } catch(e){ console.error(e); toast('No se pudo leer: ' + e.message); }
   finally { btn.disabled = false; btn.textContent = rotulo; }
 }

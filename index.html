@@ -20,6 +20,11 @@
         <canvas id="cam-overlay" style="position:absolute;inset:0;width:100%;height:100%;z-index:4"></canvas>
         <div class="month-pill"><b class="num" id="pill-total">—</b><span class="num" id="pill-mes"></span></div>
         <div class="cam-status" id="cam-status"><span class="pulse"></span><span id="cam-status-txt">Iniciando cámara…</span></div>
+        <div class="cam-idle" id="cam-idle" hidden>
+          <span class="cam-idle-logo tcb-logo" role="img" aria-label="TCB — Tax Consulting Business"></span>
+          <div class="cam-idle-desc">Registro de gastos con facturación Fiscal</div>
+          <div class="cam-idle-hint">Tocar en pantalla para activar la cámara</div>
+        </div>
         <div class="flashfx" id="flashfx"></div>
       </div>
       <div class="cam-controls">
@@ -120,7 +125,7 @@
             <button class="on" id="cam-auto-si">Iniciar al abrir</button>
             <button id="cam-auto-no">Solo al tocar</button>
           </div>
-          <div class="gem-note" style="margin-top:8px">«Solo al tocar»: la cámara se enciende cuando tocas el indicador en la pantalla de Cámara.</div>
+          <div class="gem-note" style="margin-top:8px">«Solo al tocar»: la cámara se enciende cuando tocas la pantalla de Cámara.</div>
         </div>
         <div class="card">
           <div class="eyebrow" style="margin-bottom:8px">Imagen — modo por defecto</div>

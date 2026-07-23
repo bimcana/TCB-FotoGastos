@@ -155,6 +155,23 @@ export async function moverAPapelera(fileId){
   });
 }
 
+// true si el error de Drive es de permisos (403 / insufficientFilePermissions). Puro y
+// testeable. Fase 12: distingue el caso "el archivo lo subio otra cuenta" (Lite) para
+// caer al plan B (quitarlo de la carpeta) en vez de fallar el borrado.
+export function esErrorDePermiso(err){
+  const m = (err && err.message) || '';
+  return /\bDrive 403\b/.test(m) || /insufficientFilePermissions/i.test(m);
+}
+
+// Quita el archivo de una carpeta (removeParents) SIN mandarlo a la papelera. El dueño
+// de la carpeta puede sacar un archivo aunque NO sea el dueño del archivo (lo subio otra
+// persona con la Lite): la copia sigue en el Drive de origen, pero desaparece de Gastos.
+export async function quitarDeCarpeta(fileId, carpetaId){
+  return api(`files/${fileId}?removeParents=${carpetaId}`, {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+  });
+}
+
 export async function ponerDescripcion(fileId, texto){
   return api(`files/${fileId}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' },

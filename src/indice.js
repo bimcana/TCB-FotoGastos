@@ -30,6 +30,15 @@ export function quitarEntrada(indice, archivo){
   return { ...base, facturas: base.facturas.filter(f => f.archivo !== archivo) };
 }
 
+// Fase 12: ¿el `ncf` repite el de OTRA factura del indice? Se excluye `archivoExcluir`
+// (ella misma) y las YA marcadas duplicada — asi el ORIGINAL nunca se marca (y no sale
+// del 606); solo la copia nueva. Puro. Es lo que permite detectar el duplicado de una
+// factura de Lite: llega sin NCF y solo al leerla con IA se conoce y se puede comparar.
+export function repiteNCF(indice, ncf, archivoExcluir){
+  const otros = { facturas: (indice?.facturas || []).filter(f => f.archivo !== archivoExcluir && !f.duplicada) };
+  return !!buscarDuplicado(otros, ncf);
+}
+
 // --- Fase 4: la verdad viaja con cada archivo -------------------------------
 // La entrada completa se guarda ADEMAS como JSON en el campo `description` del archivo
 // en Drive. Con N usuarios en una carpeta compartida, el indice _gastos.json puede
