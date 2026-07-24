@@ -1398,9 +1398,16 @@ async function eliminarFactura(ctx, e, nombre){
     }
     toast(via === 'papelera'
       ? `«${nombre}» eliminada — recuperable en la papelera de Drive`
-      : `«${nombre}» quitada de Gastos (la subió otra cuenta; su copia queda en el Drive de origen)`);
+      : `«${nombre}» eliminada de Gastos ✓`);
     refrescarGastos();
-  } catch(err){ console.error(err); toast('No se pudo eliminar: ' + err.message); }
+  } catch(err){
+    console.error(err);
+    // Si ni la papelera ni quitarla de la carpeta funcionan, es que no somos dueños de la
+    // carpeta compartida: mensaje honesto en vez del volcado crudo del 403.
+    toast(esErrorDePermiso(err)
+      ? 'No se pudo eliminar: la subió otra cuenta y no tienes permiso sobre la carpeta. Bórrala desde Google Drive.'
+      : 'No se pudo eliminar: ' + err.message);
+  }
 }
 
 async function renderSeccion(carpeta, bodyEl, metaEl){
