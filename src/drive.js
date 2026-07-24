@@ -163,11 +163,20 @@ export function esErrorDePermiso(err){
   return /\bDrive 403\b/.test(m) || /insufficientFilePermissions/i.test(m);
 }
 
-// Quita el archivo de una carpeta (removeParents) SIN mandarlo a la papelera. El dueño
-// de la carpeta puede sacar un archivo aunque NO sea el dueño del archivo (lo subio otra
-// persona con la Lite): la copia sigue en el Drive de origen, pero desaparece de Gastos.
+// Quita el archivo de la carpeta compartida (removeParents) SIN mandarlo a la papelera.
+// El dueño (u organizador) de la carpeta puede sacar un archivo aunque NO sea el dueño
+// del archivo (lo subio otra persona con la Lite): la copia sigue en el Drive de origen,
+// pero desaparece de Gastos. Fase 13: quita de los padres REALES del archivo (no solo la
+// carpeta del mes) para que quede totalmente desvinculado de nuestra vista aunque tenga
+// mas de un padre; si no se pueden leer, usa la carpeta que se pasa.
 export async function quitarDeCarpeta(fileId, carpetaId){
-  return api(`files/${fileId}?removeParents=${carpetaId}`, {
+  let padres = null;
+  try {
+    const r = await api(`files/${fileId}?fields=parents`);
+    if (Array.isArray(r.parents) && r.parents.length) padres = r.parents;
+  } catch(e){ /* sin lectura de padres: se usa carpetaId */ }
+  const quitar = (padres && padres.length ? padres : [carpetaId]).join(',');
+  return api(`files/${fileId}?removeParents=${encodeURIComponent(quitar)}`, {
     method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
   });
 }
