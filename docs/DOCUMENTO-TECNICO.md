@@ -218,6 +218,13 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   tipo Excel (`normalizarCampoEntrada`).
 - **Generar**: por sección de mes en el acordeón → `generarDocumento(ctx)` → PDF + 606 →
   `subirOReemplazar` + hoja de compartir iOS.
+- **ORDEN DE LOS DOCUMENTOS (Fase 21)**: `_gastos.json` guarda las facturas en el orden en
+  que se SUBIERON (una vieja puede fotografiarse días después), así que `generarDocumento`
+  aplica `ordenarParaDocumento` (naming.js, pura) **una sola vez** sobre la lista completa:
+  fecha de emisión ascendente → correlativo del nombre `Compra_DDN` (`correlativoDe`,
+  **numérico**: `Compra_112` antes que `Compra_1110`) → provisionales sin fecha al final.
+  Los tres entregables comparten esa lista para poder cotejarlos línea a línea. **No usar
+  `idx.facturas` sin ordenar en nada que se presente al usuario.**
 - **Paginado del PDF — POR TAMAÑO FÍSICO DEL PAPEL (Fase 14, 2ª pasada)**. Historia, para
   no repetir el error: la casilla fija de 198 pt dejaba una hoja carta a ~256 pt de alto,
   diminuta junto a un ticket. El 1er intento igualó la ALTURA de todas dándoles el ancho

@@ -16,8 +16,8 @@ archivarlas en Google Drive y generar el cierre mensual.
 |---|---|
 | **App Full** | https://bimcana.github.io/TCB-FotoGastos/ · repo `bimcana/TCB-FotoGastos` |
 | **App Lite** (alimentadora) | https://bimcana.github.io/TCB-Gastos-Lite/ · repo `bimcana/TCB-Gastos-Lite` |
-| **Versión actual** | Full `fase20-v1` · Lite `lite-v10` |
-| **Pruebas** | `npm test` — 200 en la Full, 60 en la Lite. Todo helper puro lleva test. |
+| **Versión actual** | Full `fase21-v1` · Lite `lite-v10` |
+| **Pruebas** | `npm test` — 205 en la Full, 60 en la Lite. Todo helper puro lleva test. |
 | **Publicar** | `git push origin main` **es** publicar (Pages sirve desde `main` en ambos repos). |
 
 **Usuario:** Ari (BIMCANA SRL, Punta Cana). Arquitecto, no programador. Prefiere el
@@ -34,6 +34,14 @@ Es el corazón del producto. Cada uno tiene un papel distinto y no son intercamb
 | PDF | ver las facturas del mes | `Gastos_{Mes_Año}.pdf` |
 | Excel | **revisar** antes de enviar | `Revision_606_{Mes_Año}.xlsx` |
 | **TXT** | **lo que se sube a la DGII** | `DGII_F_606_{RNC}_{AAAAMM}.TXT` |
+
+### Los tres van en el MISMO orden: fecha de emisión ascendente
+`ordenarParaDocumento` (naming.js, pura) se aplica **una sola vez** sobre la lista completa
+en `generarDocumento`, así el PDF, el Excel y el TXT se pueden cotejar línea a línea.
+Criterio: fecha ascendente → correlativo del nombre `Compra_DDN` (**numérico**, no
+alfabético: `Compra_112` antes que `Compra_1110`) → las provisionales sin fecha al final.
+**Ojo:** el índice `_gastos.json` guarda las facturas en el orden en que se SUBIERON —
+una factura vieja puede fotografiarse días después. Nunca lo uses sin ordenar.
 
 ### El TXT es el entregable real
 La herramienta Excel de la DGII **solo existe para producir ese TXT** con su botón
