@@ -16,8 +16,8 @@ archivarlas en Google Drive y generar el cierre mensual.
 |---|---|
 | **App Full** | https://bimcana.github.io/TCB-FotoGastos/ · repo `bimcana/TCB-FotoGastos` |
 | **App Lite** (alimentadora) | https://bimcana.github.io/TCB-Gastos-Lite/ · repo `bimcana/TCB-Gastos-Lite` |
-| **Versión actual** | Full `fase21-v1` · Lite `lite-v10` |
-| **Pruebas** | `npm test` — 205 en la Full, 60 en la Lite. Todo helper puro lleva test. |
+| **Versión actual** | Full `fase22-v1` · Lite `lite-v10` |
+| **Pruebas** | `npm test` — 212 en la Full, 60 en la Lite. Todo helper puro lleva test. |
 | **Publicar** | `git push origin main` **es** publicar (Pages sirve desde `main` en ambos repos). |
 
 **Usuario:** Ari (BIMCANA SRL, Punta Cana). Arquitecto, no programador. Prefiere el
@@ -101,6 +101,27 @@ representativo) y `../Facturas de prueba/` (57, muchas son fotos sin recortar co
 1.33, **no sirven para juzgar el paginado**).
 
 ---
+
+## 3b. El índice y Drive tienen que contar lo mismo
+
+`_gastos.json` es una **caché auto-reparable**, no la verdad: la verdad viaja en el
+`description` de cada archivo de Drive. `conciliarIndice` sincroniza **en las dos
+direcciones** — restaura lo que el índice hubiera perdido y **quita lo que ya no existe en
+Drive** (`huerfanas`). Antes solo restauraba, y borrar una factura a mano desde Drive
+dejaba el registro clavado: Gastos la mostraba sin miniatura, no dejaba borrarla y el
+cierre del mes fallaba.
+
+**Dos salvaguardas que no se tocan** (aquí un error borra registros fiscales):
+1. Con lista de archivos **vacía no se quita nada** — un fallo de red no puede vaciar el mes.
+2. `listarArchivos` **pagina de verdad** (`nextPageToken`). Cortaba en 1000 en silencio, y
+   una lista truncada habría borrado entradas válidas como si fueran huérfanas.
+
+También: `eliminarFactura` toca el archivo y limpia el índice **en pasos separados**, así
+que si el archivo ya no está, el registro se limpia igual. No los vuelvas a unir.
+
+**NCF canónico:** el OCR y la IA escriben el mismo comprobante de formas distintas
+(`B01 0000 7133`, `b0100007133`, `B01-0000-7133`). `ncfCanonico` (solo alfanuméricos en
+mayúsculas) es lo que usa `buscarDuplicado`, y el NCF **se guarda ya canónico** al leer.
 
 ## 4. Reglas que no se pueden romper
 
