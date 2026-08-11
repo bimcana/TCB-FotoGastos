@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { paginar, columnasDe, factorEscala, anchoFisico, esCarta, cabeEnPagina,
-         RATIO_LARGA, RATIO_CARTA, ESTIRADO_MAX, CAJA, ANCHO_UTIL, X_INI, HUECO,
-         MAX_COLUMNAS, ANCHO_CARTA, ANCHO_ROLLO } from '../src/pdfgastos.js';
+         realceComun, RATIO_LARGA, RATIO_CARTA, REALCE_MAX, CAJA, ANCHO_UTIL, X_INI,
+         HUECO, MAX_COLUMNAS, ANCHO_CARTA, ANCHO_ROLLO } from '../src/pdfgastos.js';
 
 const f = (ratio = 2) => ({ archivo: 'a', total: 1, ratio });
 const CARTA = 11 / 8.5;   // 1.29 — hoja carta completa
@@ -26,17 +26,20 @@ test('anchoFisico: hoja carta vs rollo de caja', () => {
 test('la gasolina de ratio bajo NO se trata como hoja (caso 051.jpg)', () => {
   // Antes: ratio 1.62 → CARTA → 8.5" de ancho → salia enorme junto a facturas mayores
   const [pag] = paginar([f(1.62), f(3.2)]);   // gasolina + ticket mas largo
-  const gasolina = pag[0].cajas[0], ticket = pag[1].cajas[0];
-  assert.ok(Math.abs(gasolina.w - ticket.w) < 1, 'ambos son rollos: mismo ancho de papel');
-  assert.ok(ticket.h > gasolina.h, 'el ticket mas largo se ve mas alto que la gasolina');
+  const gasolina = pag[0], ticket = pag[1];
+  // El ancho de PAPEL es el mismo (ambos rollos); si difieren es solo por el realce
+  assert.equal(anchoFisico(gasolina.ratio), anchoFisico(ticket.ratio));
+  assert.ok(gasolina.cajas[0].w < ANCHO_CARTA * gasolina.factor * 0.75,
+    'ni de lejos recibe el ancho de una hoja');
+  assert.ok(ticket.cajas[0].h > gasolina.cajas[0].h, 'el ticket mas largo se ve mas alto');
 });
 
 test('una hoja carta junto a una gasolina: la hoja manda y llena la altura', () => {
   const [pag] = paginar([f(1.62), f(CARTA)]);
   const gasolina = pag[0].cajas[0], carta = pag[1].cajas[0];
   assert.ok(carta.h > CAJA.h * 0.95, `la carta llena el frame (${carta.h})`);
-  assert.ok(carta.w > gasolina.w * 2, 'y es mucho mas ancha que el voucher');
-  assert.ok(carta.h > gasolina.h * 1.5, 'la gasolina no compite en altura');
+  assert.ok(carta.w > gasolina.w * 1.7, 'y es bastante mas ancha que el voucher');
+  assert.ok(carta.h > gasolina.h * 1.4, 'la gasolina crece pero no alcanza a la hoja');
 });
 
 test('RATIO_LARGA sigue en 4: solo el supermercado se divide', () => {
@@ -52,25 +55,27 @@ test('RATIO_LARGA sigue en 4: solo el supermercado se divide', () => {
 test('el voucher de gasolina NO compite con una hoja carta', () => {
   const [pag] = paginar([f(CARTA), f(GASOLINA)]);
   const carta = pag[0].cajas[0], gasolina = pag[1].cajas[0];
-  assert.ok(carta.w > gasolina.w * 2, 'la carta es mucho mas ancha');
-  assert.ok(carta.h > gasolina.h * 1.5, `la carta es mas alta (${carta.h} vs ${gasolina.h})`);
+  assert.ok(carta.w > gasolina.w * 1.5, 'la carta es bastante mas ancha');
+  assert.ok(carta.h > gasolina.h * 1.2, `la carta es mas alta (${carta.h} vs ${gasolina.h})`);
+  assert.ok(carta.h > CAJA.h * 0.95, 'y la hoja llena el frame');
 });
 
 test('la gasolina tampoco compite con un ticket largo del mismo ancho de papel', () => {
   const [pag] = paginar([f(TICKET), f(GASOLINA)]);
   const ticket = pag[0].cajas[0], gasolina = pag[1].cajas[0];
-  assert.ok(ticket.h > gasolina.h * 1.4, `ticket ${ticket.h} vs gasolina ${gasolina.h}`);
-  // mismo papel → practicamente el mismo ancho (salvo el estirado)
-  assert.ok(Math.abs(ticket.w - gasolina.w) < 1, 'ambos son rollos: mismo ancho');
+  assert.ok(ticket.h > gasolina.h * 1.15, `ticket ${ticket.h} vs gasolina ${gasolina.h}`);
+  assert.ok(ticket.h > CAJA.h * 0.95, 'el ticket largo llena el frame');
+  // Mismo papel: si el ancho difiere es solo por el realce de la mas pequeña
+  assert.equal(anchoFisico(TICKET), anchoFisico(GASOLINA));
 });
 
 test('el supermercado se ve mas grande que la gasolina (caso de la imagen 6)', () => {
   const SUPER_CORTO = 3.8;   // ticket de supermercado que aun no llega al umbral de division
   const [pag] = paginar([f(TICKET), f(GASOLINA), f(SUPER_CORTO)]);
   assert.equal(pag.length, 3, 'las tres caben en la pagina');
-  const areaDe = it => it.cajas.reduce((s, c) => s + c.w * c.h, 0);
-  assert.ok(areaDe(pag[2]) > areaDe(pag[1]), 'el supermercado ocupa mas que la gasolina');
-  assert.ok(pag[2].cajas[0].h > pag[1].cajas[0].h * 1.5, 'y es claramente mas alto');
+  // En esta maquetacion "mas grande" se percibe por la ALTURA (todas comparten banda)
+  assert.ok(pag[2].cajas[0].h > pag[1].cajas[0].h, 'el supermercado se ve mas alto que la gasolina');
+  assert.ok(pag[2].cajas[0].h > CAJA.h * 0.95, 'y llena el frame');
 });
 
 test('el supermercado dividido ocupa 2 columnas: solo cabe una factura mas', () => {
@@ -148,14 +153,47 @@ test('una carta sola aprovecha la altura completa de la banda', () => {
   assert.ok(pag[0].cajas[0].h > CAJA.h * 0.95, `alto ${pag[0].cajas[0].h}`);
 });
 
-test('los rollos se estiran como mucho un 10% y las hojas nunca', () => {
-  const [pag] = paginar([f(TICKET), f(GASOLINA)]);      // sobra sitio: se estiran
-  const anchoSinEstirar = ANCHO_ROLLO * pag[0].factor;
-  assert.ok(pag[0].cajas[0].w <= anchoSinEstirar * ESTIRADO_MAX + 0.01, 'no pasa del 10%');
-  assert.ok(pag[0].cajas[0].w >= anchoSinEstirar - 0.01, 'nunca se encoge');
-  const [pag2] = paginar([f(CARTA), f(GASOLINA)]);
-  assert.ok(Math.abs(pag2[0].cajas[0].w - ANCHO_CARTA * pag2[0].factor) < 0.01,
-    'la hoja carta conserva su proporcion exacta');
+// --- Realce de las pequeñas (Ari): que la pagina quede mas pareja ---
+
+test('una gasolina junto a un ticket largo crece si sobra sitio, sin deformarse', () => {
+  const [pag] = paginar([f(TICKET), f(1.62), f(1.62)]);   // dos gasolinas reales + un ticket
+  const ticket = pag[0].cajas[0], gasolina = pag[1].cajas[0];
+  // El ticket manda la altura; las gasolinas crecen pero sin alcanzarlo
+  assert.ok(ticket.h > gasolina.h, 'la gasolina sigue siendo mas baja que el ticket');
+  const sinRealce = ANCHO_ROLLO * pag[0].factor;
+  assert.ok(gasolina.w > sinRealce * 1.15, `la gasolina crece (${gasolina.w} vs ${sinRealce})`);
+  // Crecimiento PROPORCIONAL: la proporcion del papel se respeta
+  assert.ok(Math.abs(gasolina.h / gasolina.w - 1.62) < 0.01, 'no se deforma');
+});
+
+test('el realce nunca pasa del 50% ni rebasa la altura del frame', () => {
+  for (const items of [[f(1.62), f(1.62)], [f(TICKET), f(1.62), f(2.2)], [f(CARTA), f(1.62)]]){
+    for (const pag of paginar(items)){
+      for (const it of pag){
+        for (const c of it.cajas){
+          assert.ok(c.h <= CAJA.h + 0.01, `alto ${c.h} cabe en el frame`);
+          const sinRealce = anchoFisico(it.ratio) * it.factor;
+          assert.ok(c.w <= sinRealce * REALCE_MAX + 0.01, `no pasa del 50% (${c.w})`);
+        }
+      }
+    }
+  }
+});
+
+test('la hoja carta no se realza: ya llena la altura', () => {
+  const [pag] = paginar([f(CARTA), f(GASOLINA)]);
+  assert.ok(Math.abs(pag[0].cajas[0].w - ANCHO_CARTA * pag[0].factor) < 0.01,
+    'la hoja conserva su tamaño exacto');
+});
+
+test('realceComun: reparte el ancho libre respetando el tope de cada una', () => {
+  const cerca = (a, b) => assert.ok(Math.abs(a - b) < 0.01, `${a} ≈ ${b}`);
+  // dos columnas de 100 pt: una puede crecer x1.5, la otra ya esta al maximo (tope 1)
+  cerca(realceComun([100, 100], [1.5, 1], 50), 1.5);   // le sobra sitio: crece al maximo
+  cerca(realceComun([100, 100], [1.5, 1], 25), 1.25);  // solo la mitad del camino
+  assert.equal(realceComun([100, 100], [1.5, 1], 0), 1);  // sin sitio, no crece
+  assert.equal(realceComun([100], [1], 500), 1);          // con tope 1 nunca crece
+  assert.equal(realceComun([100], [1.5], -10), 1);        // ancho negativo: no revienta
 });
 
 test('nada se sale de la banda y las cajas van separadas y en orden', () => {
