@@ -1,6 +1,103 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tipoId, filas606, montoFacturado, nombreArchivo606, TIPO_BIENES, FORMA_PAGO } from '../src/f606.js';
+import { tipoId, filas606, montoFacturado, nombreArchivo606, TIPO_BIENES, FORMA_PAGO,
+         generarTXT606, lineaTXT606, montoTXT, fechaTXT, nombreTXT606 } from '../src/f606.js';
+
+// --- Fase 16: archivo .TXT de envio a la Oficina Virtual ---
+// Contrato tomado del VBA de la propia herramienta DGII (modulo modServicios, boton
+// «Generar Archivo»), extraido y descomprimido de la plantilla oficial:
+//   strHeader  = "606|" & RNC & "|" & Periodo & "|" & Registros
+//   strDetalle = 23 campos con "|", con Mid(...,1,2) en tipo de bienes y forma de pago
+//   fechas     = ConcatFecha_one(AAAAMM, dia) = AAAAMM & Format$(dia,"00")
+//   la ultima linea se imprime con `Print #1, x;` → sin salto de linea final
+
+const FILA = {
+  rnc: '131067603', tipoId: 1, tipoBienes: TIPO_BIENES, ncf: 'E310000025067', ncfModificado: '',
+  fechaComprobante: 202606, dia: 6, montoFacturado: 4940.01, itbisFacturado: 889.20,
+  propinaLegal: 494, formaPago: FORMA_PAGO
+};
+
+test('montoTXT: sin separador de miles, punto decimal y sin relleno de ceros', () => {
+  assert.equal(montoTXT(3050), '3050');
+  assert.equal(montoTXT(4940.01), '4940.01');
+  assert.equal(montoTXT(0), '0');
+  assert.equal(montoTXT(1234567.891), '1234567.89');   // redondea a 2 decimales
+  assert.equal(montoTXT(0.1 + 0.2), '0.3');            // sin basura de coma flotante
+  assert.equal(montoTXT(null), '');
+  assert.equal(montoTXT(''), '');
+});
+
+test('fechaTXT: AAAAMM + dia a dos digitos (ConcatFecha_one)', () => {
+  assert.equal(fechaTXT(202606, 6), '20260606');
+  assert.equal(fechaTXT(202606, 15), '20260615');
+  assert.equal(fechaTXT(202606, null), '202606');      // sin dia queda solo el periodo
+  assert.equal(fechaTXT('', 5), '');
+});
+
+test('lineaTXT606: 23 campos y solo el CODIGO en tipo de bienes y forma de pago', () => {
+  const campos = lineaTXT606(FILA).split('|');
+  assert.equal(campos.length, 23);
+  assert.equal(campos[0], '131067603');   // 1  RNC
+  assert.equal(campos[1], '1');           // 2  tipo id
+  assert.equal(campos[2], '02');          // 3  SOLO el codigo, no la etiqueta larga
+  assert.equal(campos[3], 'E310000025067');
+  assert.equal(campos[4], '');            // 5  NCF modificado
+  assert.equal(campos[5], '20260606');    // 6  fecha comprobante AAAAMMDD
+  assert.equal(campos[6], '');            // 7  fecha de pago
+  assert.equal(campos[7], '4940.01');     // 8  servicios
+  assert.equal(campos[8], '');            // 9  bienes
+  assert.equal(campos[9], '4940.01');     // 10 total facturado
+  assert.equal(campos[10], '889.2');      // 11 ITBIS facturado
+  assert.equal(campos[14], '889.2');      // 15 ITBIS por adelantar = facturado
+  assert.equal(campos[21], '494');        // 22 propina legal
+  assert.equal(campos[22], '01');         // 23 SOLO el codigo de forma de pago
+});
+
+test('generarTXT606: cabecera 606|RNC|periodo|registros y sin salto final', () => {
+  const txt = generarTXT606([FILA, { ...FILA, ncf: 'B0100007133' }],
+                            { rnc: '1-33-23182-4' }, '2026-06');
+  const lineas = txt.split('\r\n');
+  assert.equal(lineas[0], '606|133231824|202606|2');
+  assert.equal(lineas.length, 3);
+  assert.ok(!txt.endsWith('\r\n'), 'la macro cierra con Print #1, x; (sin salto final)');
+  assert.ok(!txt.endsWith('\n'));
+});
+
+test('generarTXT606: sin facturas deja la cabecera en 0 registros (y esa SI cierra con CRLF)', () => {
+  assert.equal(generarTXT606([], { rnc: '133231824' }, '2026-06'), '606|133231824|202606|0\r\n');
+});
+
+// Campos 10 (total facturado) y 15 (ITBIS por adelantar) los CALCULA la macro, asi que
+// siempre llevan numero — nunca quedan vacios, ni siquiera valiendo cero.
+test('los campos calculados 10 y 15 nunca van vacios', () => {
+  const campos = lineaTXT606({ ...FILA, montoFacturado: null, itbisFacturado: null }).split('|');
+  assert.equal(campos[9], '0');
+  assert.equal(campos[14], '0');
+});
+
+// La longitud de NCF varia: 11 en los clasicos (B01…) y 13 en los electronicos (E31…).
+test('acepta NCF clasico de 11 y e-NCF de 13 caracteres', () => {
+  assert.equal(lineaTXT606({ ...FILA, ncf: 'B0100007133' }).split('|')[3].length, 11);
+  assert.equal(lineaTXT606({ ...FILA, ncf: 'E310000025067' }).split('|')[3].length, 13);
+});
+
+test('nombreTXT606: mayusculas y extension .TXT', () => {
+  assert.equal(nombreTXT606('1-33-23182-4', '2026-06'), 'DGII_F_606_133231824_202606.TXT');
+});
+
+test('el TXT sale coherente con las filas del 606 (cedula con cero, propina solo si hay)', () => {
+  const filas = filas606([
+    { estado:'completa', rncEmisor:'012-0015611-3', ncf:'B0100007133', fechaEmision:'2026-06-02',
+      subtotal:3050, itbis:0, total:3050, propinaLegal:0 }
+  ], '2026-06');
+  const campos = generarTXT606(filas, { rnc:'133231824' }, '2026-06').split('\r\n')[1].split('|');
+  assert.equal(campos[0], '01200156113');  // conserva el cero inicial
+  assert.equal(campos[1], '2');            // cedula
+  assert.equal(campos[5], '20260602');
+  assert.equal(campos[7], '3050');
+  assert.equal(campos[10], '0');           // ITBIS cero se escribe como 0
+  assert.equal(campos[21], '');            // sin propina → campo vacio
+});
 
 // Contrato verificado contra el ejemplar real de la contabilidad
 // (DGII_F_606_133231824_202606.xls): C = numero, G = AAAAMM numerico, H = dia numerico.
