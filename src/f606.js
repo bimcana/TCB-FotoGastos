@@ -1,33 +1,21 @@
 // Formato 606 (DGII) — Compras de Bienes y Servicios.
 //
-// Fase 14: el Excel se genera RELLENANDO la plantilla oficial de la DGII
-// (`vendor/dgii/formato606-base.xlsx`, derivada de «Formato de Envío 606 NG-07-2018 y
-// 05-2019»), no un libro inventado. Asi el contador recibe la hoja que ya conoce, con
-// sus encabezados y columnas exactas.
+// Cada cierre de mes produce TRES archivos, cada uno con su papel:
+//   1. El PDF con las facturas (pdfgastos.js).
+//   2. Un Excel de REVISION (`generarXLSXRevision`): para repasar el mes antes de enviar.
+//      NO imita la plantilla de la DGII a proposito — ese papel lo cumple el .TXT.
+//   3. El **.TXT de envio** (`generarTXT606`): lo que de verdad se sube a la Oficina
+//      Virtual. Verificado IDENTICO byte a byte contra un archivo real generado por la
+//      herramienta oficial (DGII_F_606_133231824_202606.txt, 20 facturas de junio 2026).
 //
-// MAPEO verificado contra el ejemplar real de la contabilidad
-// (DGII_F_606_133231824_202606.xls, junio 2026):
-//   C4  RNC/Cedula de la empresa (TEXTO)      C5  Periodo AAAAMM      C6  Cant. registros
-//   Fila 11 = encabezados. Datos desde la fila 12:
-//   A linea | B RNC/Cedula proveedor (TEXTO: conserva el 0 inicial de las cedulas)
-//   C Tipo Id (1=RNC 9 digitos, 2=cedula 11) | D tipo de bienes/servicios (constante)
-//   E NCF | F NCF modificado (vacio) | G fecha AAAAMM | H dia
-//   K monto en servicios | L monto en bienes | M total facturado (=K+L, SIN ITBIS)
-//   N ITBIS facturado | R ITBIS por adelantar (=N) | Y propina legal | Z forma de pago
-//
-// DECISIONES tomadas del ejemplar (si contabilidad las cambia, se ajustan aqui):
-//   - Todo el monto va a SERVICIOS (K); bienes (L) queda vacio — asi lo hace el ejemplar
-//     en sus 20 filas.
-//   - M = subtotal (monto facturado sin ITBIS), NO el total pagado. Verificado: una fila
-//     con K=4940.01, N=889.20 e Y=494 tiene M=4940.01.
-//   - R (ITBIS por adelantar) = N (ITBIS facturado), incluido cuando N=0.
-//   - Y (propina legal) solo se escribe cuando hay propina, como el ejemplar.
+// Se intento antes rellenar la plantilla .xls oficial, pero se descarto: sus macros —que
+// son las que producen el TXT— no sobreviven a ninguna via automatica, y Office bloquea
+// los archivos con macros bajados de internet. Generando el TXT directo, toda esa cadena
+// deja de hacer falta.
 import { cargarScript } from './carga.js';
 
-export const PLANTILLA_606 = 'vendor/dgii/formato606-base.xlsx';
-export const HOJA_606 = 'Herramienta Formato 606';
-export const FILA_DATOS = 12;              // primera fila de datos (11 = encabezados)
-export const TIPO_BIENES = '02-GASTOS POR TRABAJOS, SUMINISTROS Y SERVICIOS ';  // espacio final incluido: es el valor exacto de la lista DGII
+// Valor exacto de la lista de la DGII (con su espacio final). Al TXT solo va el codigo.
+export const TIPO_BIENES = '02-GASTOS POR TRABAJOS, SUMINISTROS Y SERVICIOS ';
 export const FORMA_PAGO = '01 - EFECTIVO';
 
 export function tipoId(rnc){
@@ -153,68 +141,108 @@ export function blobTXT606(texto){
   return new Blob([texto], { type: 'text/plain;charset=utf-8' });
 }
 
-// Anchos de columna (se pierden al derivar la plantilla; se reponen para que la hoja
-// abra legible). Indices 0..25 = A..Z.
-const ANCHOS = [
-  { wch: 7 }, { wch: 14 }, { wch: 7 }, { wch: 42 }, { wch: 16 }, { wch: 16 },
-  { wch: 10 }, { wch: 5 }, { wch: 10 }, { wch: 5 }, { wch: 15 }, { wch: 15 },
-  { wch: 15 }, { wch: 14 }, { wch: 13 }, { wch: 15 }, { wch: 14 }, { wch: 14 },
-  { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 14 },
-  { wch: 14 }, { wch: 20 }
-];
+// --- HOJA DE REVISION (Fase 17) -------------------------------------------
+// El Excel dejo de imitar la plantilla de la DGII: ese papel ya lo hace el .TXT, que se
+// genera identico al oficial. Aqui lo util es OTRA cosa — que el usuario pueda repasar el
+// mes antes de subir: datos en formato dominicano, el nombre del comercio (que el 606 no
+// lleva), el archivo de la foto para ir a verla, los totales para cuadrar y, sobre todo,
+// LAS FACTURAS QUE QUEDARON FUERA con su motivo.
+
+export function motivoExclusion(f){
+  if (f.duplicada) return 'Duplicada (NCF repetido)';
+  if (f.estado === 'pendiente') return 'Pendiente de validar';
+  if (f.estado === 'incompleta'){
+    const faltan = [];
+    if (!f.fechaEmision) faltan.push('fecha');
+    if (!f.ncf) faltan.push('NCF');
+    if (!f.rncEmisor) faltan.push('RNC');
+    if (typeof f.total !== 'number') faltan.push('total');
+    return faltan.length ? 'Falta ' + faltan.join(', ') : 'Datos incompletos';
+  }
+  return 'No incluida';
+}
+
+// Separa lo que va al envio de lo que se queda fuera (con el motivo). Puro.
+export function repartoRevision(facturas){
+  const todas = facturas || [];
+  const incluidas = todas.filter(f => f.estado === 'completa' && !f.duplicada);
+  const excluidas = todas.filter(f => !(f.estado === 'completa' && !f.duplicada))
+                         .map(f => ({ ...f, motivo: motivoExclusion(f) }));
+  const suma = (arr, campo) => arr.reduce((s, f) => s + (typeof f[campo] === 'number' ? f[campo] : 0), 0);
+  const r2 = n => Math.round(n * 100) / 100;
+  return {
+    incluidas, excluidas,
+    totales: {
+      subtotal: r2(incluidas.reduce((s, f) => s + (montoFacturado(f) || 0), 0)),
+      itbis: r2(suma(incluidas, 'itbis')),
+      propina: r2(suma(incluidas, 'propinaLegal')),
+      total: r2(suma(incluidas, 'total'))
+    }
+  };
+}
+
+export function nombreRevision606(mesTexto){
+  return `Revision_606_${String(mesTexto || '').replace(/\s+/g, '_')}.xlsx`;
+}
+
+const ENCABEZADOS = ['#', 'Archivo', 'Fecha', 'NCF', 'RNC / Cédula', 'Tipo', 'Comercio',
+                     'Subtotal', 'ITBIS', 'Propina', 'Total', 'Forma de pago'];
 
 /**
- * Rellena la plantilla oficial de la DGII con las filas del periodo.
- * `fetchPlantilla` se inyecta en las pruebas; en la app es fetch del vendor.
+ * Excel de revision del mes. Una hoja legible, no la plantilla de la DGII.
+ * `fmtFecha` y `fmtMonto` se inyectan desde validacion.js (formato dominicano).
  */
-export async function generarXLSX606(filas, empresa, periodo, mesTexto, opciones = {}){
-  // Si SheetJS ya esta cargado (o inyectado en pruebas) no se vuelve a pedir.
+export async function generarXLSXRevision(facturas, empresa, periodo, mesTexto, fmt = {}){
   if (typeof XLSX === 'undefined') await cargarScript('vendor/sheetjs/xlsx.full.min.js');
-  const traer = opciones.fetchPlantilla || (async () => {
-    const r = await fetch(PLANTILLA_606);
-    if (!r.ok) throw new Error('No se encontró la plantilla 606 de la DGII');
-    return new Uint8Array(await r.arrayBuffer());
-  });
-  const wb = XLSX.read(await traer(), { type: 'array', cellNF: true });
-  const ws = wb.Sheets[HOJA_606];
-  if (!ws) throw new Error('La plantilla 606 no tiene la hoja «' + HOJA_606 + '»');
-
+  const fecha = fmt.fecha || (v => v || '');
+  const monto = fmt.monto || (v => (typeof v === 'number' ? v : ''));
+  const { incluidas, excluidas, totales } = repartoRevision(facturas);
   const per = String(periodo || '').replace('-', '');
-  const set = (dir, v, t, z) => { ws[dir] = { v, t, ...(z ? { z } : {}) }; };
-  // Cabecera: el RNC va como TEXTO (formato @) para no perder ceros a la izquierda.
-  set('C4', String(empresa?.rnc || '').replace(/\D/g, ''), 's', '@');
-  set('C5', Number(per) || per, 'n', '@');
-  set('C6', filas.length, 'n');
 
-  const DIN = '#,##0.00';
-  filas.forEach((f, i) => {
-    const r = FILA_DATOS + i;
-    set('A' + r, i + 1, 'n');
-    set('B' + r, f.rnc, 's');                 // TEXTO: las cedulas empiezan por 0
-    set('C' + r, f.tipoId, 'n');
-    set('D' + r, f.tipoBienes, 's');
-    set('E' + r, f.ncf, 's');
-    if (f.ncfModificado) set('F' + r, f.ncfModificado, 's');
-    set('G' + r, f.fechaComprobante, 'n', '@');
-    if (f.dia != null) set('H' + r, f.dia, 'n');
-    if (f.montoFacturado != null){
-      set('K' + r, f.montoFacturado, 'n', DIN); // servicios
-      set('M' + r, f.montoFacturado, 'n', DIN); // total facturado = servicios + bienes
-    }
-    set('N' + r, f.itbisFacturado, 'n', DIN);
-    set('R' + r, f.itbisFacturado, 'n', DIN);   // ITBIS por adelantar
-    if (f.propinaLegal != null) set('Y' + r, f.propinaLegal, 'n', DIN);
-    set('Z' + r, f.formaPago, 's');
-  });
+  const filas = [
+    [`Revisión del Formato 606 — ${mesTexto || ''}`],
+    [`${empresa?.razon || ''}`, `RNC: ${empresa?.rnc || ''}`],
+    [`Período ${per}`, `${incluidas.length} factura(s) en el envío`,
+     excluidas.length ? `${excluidas.length} fuera del envío` : ''],
+    [],
+    ['ESTAS FACTURAS VAN EN EL ARCHIVO DGII_F_606_' + String(empresa?.rnc || '').replace(/\D/g, '') + '_' + per + '.TXT'],
+    ENCABEZADOS
+  ];
+  incluidas.forEach((f, i) => filas.push([
+    i + 1,
+    f.archivo || '',
+    fecha(f.fechaEmision),
+    f.ncf || '',
+    String(f.rncEmisor || '').replace(/\D/g, ''),
+    tipoId(f.rncEmisor) === 2 ? 'Cédula' : 'RNC',
+    f.nombreComercio || '',
+    monto(montoFacturado(f)),
+    monto(typeof f.itbis === 'number' ? f.itbis : 0),
+    monto(typeof f.propinaLegal === 'number' ? f.propinaLegal : 0),
+    monto(f.total),
+    FORMA_PAGO
+  ]));
+  filas.push([]);
+  filas.push(['', '', '', '', '', '', 'TOTALES',
+    monto(totales.subtotal), monto(totales.itbis), monto(totales.propina), monto(totales.total), '']);
 
-  // Ampliar el rango declarado para que Excel vea las filas nuevas.
-  const finCol = 'AF';
-  const ultima = Math.max(FILA_DATOS + filas.length - 1, 12);
-  const refPrevio = ws['!ref'] || 'A1:AF12';
-  const filasPrevias = Number(String(refPrevio).split(':')[1].replace(/\D/g, '')) || 12;
-  ws['!ref'] = `A1:${finCol}${Math.max(ultima, filasPrevias)}`;
-  ws['!cols'] = ANCHOS;
+  if (excluidas.length){
+    filas.push([]);
+    filas.push(['NO ENTRAN EN EL ENVÍO — revísalas en la app si corresponde']);
+    filas.push(['#', 'Archivo', 'Fecha', 'NCF', 'RNC / Cédula', 'Motivo', 'Comercio', '', '', '', 'Total', '']);
+    excluidas.forEach((f, i) => filas.push([
+      i + 1, f.archivo || '', fecha(f.fechaEmision), f.ncf || '',
+      String(f.rncEmisor || '').replace(/\D/g, ''), f.motivo, f.nombreComercio || '',
+      '', '', '', monto(f.total), ''
+    ]));
+  }
 
+  const ws = XLSX.utils.aoa_to_sheet(filas);
+  ws['!cols'] = [{ wch: 4 }, { wch: 18 }, { wch: 12 }, { wch: 16 }, { wch: 14 }, { wch: 22 },
+                 { wch: 30 }, { wch: 13 }, { wch: 11 }, { wch: 10 }, { wch: 13 }, { wch: 15 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Revisión 606');
   const buf = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
   return new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
 }
+

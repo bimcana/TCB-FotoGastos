@@ -234,7 +234,24 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   entera; 3 no caben). Medido: carta 396 pt vs gasolina 238 pt en la misma página.
   `generarPDF` dibuja con `it.cajas[]` (`{x,w,h}`, altura propia por caja), ya no con `xs`.
 
-## 5c. Archivo .TXT de envío a la DGII (Fase 16) — EL ENTREGABLE REAL
+## 5c. Los TRES entregables del cierre de mes (Fase 17)
+
+| Archivo | Para qué | Nombre |
+|---|---|---|
+| PDF | ver las facturas del mes | `Gastos_{Mes_Año}.pdf` |
+| Excel | **revisar** antes de enviar | `Revision_606_{Mes_Año}.xlsx` |
+| **TXT** | **lo que se sube a la DGII** | `DGII_F_606_{RNC}_{AAAAMM}.TXT` |
+
+El Excel **ya NO imita la plantilla de la DGII** — ese papel lo cumple el TXT, que sale
+idéntico al oficial. Ahora es una hoja de revisión (`generarXLSXRevision`): datos en
+formato dominicano, **el comercio y el archivo de la foto** (que el 606 no lleva),
+totales para cuadrar y, abajo, **las facturas que NO entran al envío con su motivo**
+(`repartoRevision` / `motivoExclusion`, puros y testeados). Lleva nombre propio para que
+nadie lo confunda con el TXT oficial.
+
+Se retiró `vendor/dgii/formato606-base.xlsx` y el generador que la rellenaba: sin uso.
+
+## 5d. Archivo .TXT de envío a la DGII (Fase 16) — EL ENTREGABLE REAL
 
 **Lo que la DGII recibe NO es el Excel: es un `.TXT`.** La herramienta Excel solo existe
 para producirlo con su botón «Generar Archivo». Ari no podía ni abrir los .xls de su
@@ -261,8 +278,14 @@ macros y sin nada que Office pueda bloquear.
 Implementado en f606.js con funciones puras y testeadas: `montoTXT`, `fechaTXT`,
 `lineaTXT606`, `generarTXT606`, `nombreTXT606`. **Si alguna vez la DGII rechaza el
 archivo, la comparación se hace contra ese VBA, no contra suposiciones.**
-Se generan los TRES archivos por mes: PDF (revisión visual), .xlsx (lectura de
-contabilidad) y **.TXT (el que se sube)**.
+
+**VALIDACIÓN DEFINITIVA (Fase 17):** Ari aportó el TXT real que su contabilidad generó
+con el botón «Generar Archivo» (`DGII_F_606_133231824_202606.txt`, 20 facturas de junio).
+Se reconstruyeron esas facturas y se regeneró el archivo con este código: **idéntico byte
+a byte** (script `comparar-txt.mjs`), incluyendo propinas (494, 73.43, 81), cédulas con
+cero inicial, montos con y sin decimales e ITBIS en cero. El archivo real confirma además:
+CRLF, sin salto final, 100% ASCII. Ya no es una suposición razonada — está comprobado
+contra el output de la herramienta oficial.
 
 ## 5b. Formato 606 sobre la plantilla oficial (Fase 14)
 

@@ -876,8 +876,8 @@ import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNo
          debeMostrarReconectar, esErrorDePermiso, quitarDeCarpeta,
          correoDeLaCuenta, recordarCuenta } from './drive.js';
 import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
-import { filas606, generarXLSX606, nombreArchivo606,
-         generarTXT606, blobTXT606, nombreTXT606 } from './f606.js';
+import { filas606, generarTXT606, blobTXT606, nombreTXT606,
+         generarXLSXRevision, nombreRevision606 } from './f606.js';
 
 import { CLIENT_ID_APP } from './config.js';
 
@@ -1647,16 +1647,16 @@ async function generarDocumento(ctx){
     txtBar.textContent = 'Generando — armando el PDF…';
     const pdfBlob = await generarPDF(paginar(items), emp, mesTexto);
     txtBar.textContent = 'Generando — armando el 606…';
-    const filas = filas606(todas, periodo);       // mismas filas para el Excel y el TXT
-    const xlsxBlob = await generarXLSX606(filas, emp, periodo, mesTexto);
+    // TRES entregables por mes: el PDF para ver las facturas, el Excel para REVISAR el
+    // mes antes de enviar, y el .TXT que es lo que de verdad se sube a la DGII.
+    const filas = filas606(todas, periodo);
+    const xlsxBlob = await generarXLSXRevision(todas, emp, periodo, mesTexto,
+      { fecha: v => formatearFechaDO(v), monto: v => (typeof v === 'number' ? v : '') });
     txtBar.textContent = 'Generando — subiendo a Drive…';
     const nombrePDF = `Gastos_${mesTexto.replace(' ', '_')}.pdf`;
-    // Nombre con el patron de la DGII (DGII_F_606_{RNC}_{AAAAMM}): la contabilidad lo
-    // reconoce igual que el que descarga de la oficina virtual.
-    const nombreXLSX = nombreArchivo606(emp.rnc, periodo);
-    // EL ENTREGABLE REAL: el .TXT que se sube a la Oficina Virtual. La herramienta Excel
-    // de la DGII solo existe para producirlo con su boton «Generar Archivo»; aqui se crea
-    // directo, con el formato de su propia macro (ver f606.js).
+    const nombreXLSX = nombreRevision606(mesTexto);
+    // El .TXT lleva el nombre oficial de la DGII y se genera con el formato de su propia
+    // macro — verificado identico byte a byte contra un archivo real de la herramienta.
     const nombreTXT = nombreTXT606(emp.rnc, periodo);
     const txtBlob = blobTXT606(generarTXT606(filas, emp, periodo));
     await subirOReemplazar(pdfBlob, nombrePDF, ctx.mesId);
