@@ -2,7 +2,61 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
          nombreProvisional, esProvisional, nombreCoincideConFecha, nombreUnico, necesitaReArchivo,
-         mesesDeCarpetas, accionesCarpeta, CARPETA_ARCHIVO } from '../src/naming.js';
+         mesesDeCarpetas, accionesCarpeta, CARPETA_ARCHIVO,
+         ordenarParaDocumento, correlativoDe } from '../src/naming.js';
+
+// --- Fase 21: los documentos del cierre van por fecha de emision ascendente ---
+// El indice guarda las facturas en el orden en que se SUBIERON: una factura vieja puede
+// fotografiarse despues, y el PDF salia desordenado.
+
+const fact = (archivo, fechaEmision) => ({ archivo, fechaEmision, estado: 'completa' });
+
+test('ordenarParaDocumento: por fecha, aunque se hayan subido en otro orden', () => {
+  const subidas = [
+    fact('Compra_150.jpg', '2026-06-15'),
+    fact('Compra_020.jpg', '2026-06-02'),   // vieja, fotografiada al final
+    fact('Compra_270.jpg', '2026-06-27'),
+    fact('Compra_090.jpg', '2026-06-09')
+  ];
+  assert.deepEqual(ordenarParaDocumento(subidas).map(f => f.archivo),
+    ['Compra_020.jpg', 'Compra_090.jpg', 'Compra_150.jpg', 'Compra_270.jpg']);
+});
+
+test('ordenarParaDocumento: dentro del mismo dia manda el correlativo, no el texto', () => {
+  const mismoDia = [
+    fact('Compra_1110.jpg', '2026-06-11'),  // correlativo 10
+    fact('Compra_112.jpg',  '2026-06-11'),  // correlativo 2
+    fact('Compra_110.jpg',  '2026-06-11')   // correlativo 0
+  ];
+  assert.deepEqual(ordenarParaDocumento(mismoDia).map(f => f.archivo),
+    ['Compra_110.jpg', 'Compra_112.jpg', 'Compra_1110.jpg']);
+});
+
+test('ordenarParaDocumento: las provisionales sin fecha quedan al final', () => {
+  const lista = [
+    fact('Pendiente_20260610-101500.jpg', null),
+    fact('Compra_270.jpg', '2026-06-27'),
+    fact('Compra_020.jpg', '2026-06-02')
+  ];
+  assert.deepEqual(ordenarParaDocumento(lista).map(f => f.archivo),
+    ['Compra_020.jpg', 'Compra_270.jpg', 'Pendiente_20260610-101500.jpg']);
+});
+
+test('ordenarParaDocumento: no muta la lista original y aguanta vacios', () => {
+  const original = [fact('Compra_270.jpg', '2026-06-27'), fact('Compra_020.jpg', '2026-06-02')];
+  const copia = [...original];
+  ordenarParaDocumento(original);
+  assert.deepEqual(original, copia, 'la lista de entrada no se toca');
+  assert.deepEqual(ordenarParaDocumento([]), []);
+  assert.deepEqual(ordenarParaDocumento(null), []);
+});
+
+test('correlativoDe: extrae la N de Compra_DDN', () => {
+  assert.equal(correlativoDe('Compra_110.jpg'), 0);
+  assert.equal(correlativoDe('Compra_1112.jpg'), 12);
+  assert.equal(correlativoDe('Pendiente_20260610-101500.jpg'), Number.MAX_SAFE_INTEGER);
+  assert.equal(correlativoDe(null), Number.MAX_SAFE_INTEGER);
+});
 
 test('mesesDeCarpetas: unicos, ordenados, incluye el mes actual', () => {
   const nombres = ['2025-06_Junio', '2026-07_Julio', '2025-06_Junio', 'Gastos_x.pdf'];

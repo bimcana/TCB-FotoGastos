@@ -1045,7 +1045,7 @@ document.addEventListener('pointerdown', () => {
 // Confirmar y subir + pantalla Gastos (Task 10)
 import { nombreCarpetaMes, siguienteNombre, hoyISO,
          nombreProvisional, nombreUnico, esProvisional, necesitaReArchivo,
-         accionesCarpeta, CARPETA_ARCHIVO } from './naming.js';
+         accionesCarpeta, CARPETA_ARCHIVO, ordenarParaDocumento } from './naming.js';
 
 // Cola offline en IndexedDB con reintento al reconectar (Task 11)
 import { encolar, pendientes, eliminar, cuenta } from './queue.js';
@@ -1621,7 +1621,10 @@ async function generarDocumento(ctx){
   const emp = empresaGuardada();
   if (!empresaCompleta(emp)){ toast('Configura la Empresa en Ajustes (razón social y RNC)'); show('ajustes'); return; }
   const idx = await leerJSON(ctx.mesId, '_gastos.json').catch(() => null);
-  const todas = idx?.facturas || [];
+  // El indice guarda las facturas en el orden en que se SUBIERON. Los tres documentos del
+  // cierre van SIEMPRE por fecha de emision ascendente (Fase 21), y comparten esta misma
+  // lista para que el PDF, el Excel de revision y el TXT se puedan cotejar linea a linea.
+  const todas = ordenarParaDocumento(idx?.facturas || []);
   if (!todas.length) return toast('Este mes no tiene facturas registradas');
   const completas = todas.filter(f => f.estado === 'completa' && !f.duplicada);
   const sinValidar = todas.filter(f => f.estado !== 'completa').length;
