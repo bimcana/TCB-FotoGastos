@@ -29,9 +29,17 @@ export const RATIO_LARGA = 4;
 // escalan con el MISMO factor (pt por pulgada). Asi el PDF respeta las proporciones
 // reales: la carta se ve grande, el ticket de supermercado alto, y el voucher de
 // gasolina pequeño — que es como estan sobre la mesa.
-// El ancho fisico se deduce del ratio, calibrado con 93 facturas reales: hasta 1.9 son
-// hojas (carta/A4, 8.5"), por encima son rollos de caja (~3").
-export const RATIO_CARTA = 1.9;
+// El ancho fisico se deduce del ratio. FRONTERA CALIBRADA MIRANDO LAS FACTURAS, no solo
+// los numeros (Fase 19, tras el reporte de Ari de que una gasolina salia enorme y una
+// factura mayor diminuta):
+//   240.jpg  ratio 1.31 → hoja carta REAL (BM Cargo, 8.5x11 completa)
+//   051.jpg  ratio 1.62 → GASOLINA (rollo termico de United Petroleum)
+// Con el umbral viejo (1.9) los vouchers de gasolina entraban como hojas, recibian 8.5"
+// de ancho y aplastaban al resto de la pagina. Los formatos de hoja de verdad son carta
+// (11/8.5 = 1.294) y A4 (1.414); 1.45 los cubre con holgura y deja fuera los vouchers.
+// Oficio (1.647) queda como rollo a proposito: es raro, y confundirlo con un voucher de
+// gasolina hace mas daño que mostrarlo algo mas estrecho.
+export const RATIO_CARTA = 1.45;
 export const ANCHO_CARTA = 8.5;   // pulgadas
 export const ANCHO_ROLLO = 3;
 // REGLA DE LLENADO (Ari, 2026-08-11, tras ver el PDF real): **SIEMPRE 3 facturas por
