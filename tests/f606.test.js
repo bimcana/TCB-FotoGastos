@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { tipoId, filas606, montoFacturado, nombreArchivo606, TIPO_BIENES, FORMA_PAGO,
-         generarTXT606, lineaTXT606, montoTXT, fechaTXT, nombreTXT606 } from '../src/f606.js';
+         generarTXT606, lineaTXT606, montoTXT, fechaTXT, nombreTXT606,
+         repartoRevision, motivoExclusion, nombreRevision606 } from '../src/f606.js';
 
 // --- Fase 16: archivo .TXT de envio a la Oficina Virtual ---
 // Contrato tomado del VBA de la propia herramienta DGII (modulo modServicios, boton
@@ -162,4 +163,41 @@ test('filas606: sin fecha valida cae al periodo y deja el dia vacio', () => {
 test('nombreArchivo606: patron de la DGII', () => {
   assert.equal(nombreArchivo606('1-33-23182-4', '2026-06'), 'DGII_F_606_133231824_202606.xlsx');
   assert.equal(nombreArchivo606('', '2026-06'), 'DGII_F_606_SIN_RNC_202606.xlsx');
+});
+
+// --- Fase 17: hoja de REVISION (el Excel ya no imita la plantilla de la DGII) ---
+
+test('repartoRevision: separa lo que va al envio de lo que queda fuera, con totales', () => {
+  const r = repartoRevision([
+    { estado:'completa', duplicada:false, subtotal:1000, itbis:180, propinaLegal:0,   total:1180 },
+    { estado:'completa', duplicada:false, subtotal:500,  itbis:90,  propinaLegal:50,  total:640 },
+    { estado:'completa', duplicada:true,  subtotal:200,  itbis:36,  total:236, ncf:'B01' },
+    { estado:'pendiente', total:100 },
+    { estado:'incompleta', ncf:'B02', total:70 }
+  ]);
+  assert.equal(r.incluidas.length, 2);
+  assert.equal(r.excluidas.length, 3);
+  assert.equal(r.totales.subtotal, 1500);
+  assert.equal(r.totales.itbis, 270);
+  assert.equal(r.totales.propina, 50);
+  assert.equal(r.totales.total, 1820);
+});
+
+test('motivoExclusion: dice POR QUE quedo fuera cada factura', () => {
+  assert.match(motivoExclusion({ duplicada: true, estado: 'completa' }), /Duplicada/);
+  assert.match(motivoExclusion({ estado: 'pendiente' }), /Pendiente/);
+  assert.match(motivoExclusion({ estado: 'incompleta', ncf: 'B01', rncEmisor: '131067603', total: 5 }), /fecha/);
+  assert.match(motivoExclusion({ estado: 'incompleta', fechaEmision: '2026-06-01', rncEmisor: '1', total: 5 }), /NCF/);
+  assert.match(motivoExclusion({ estado: 'incompleta', fechaEmision: '2026-06-01', ncf: 'B01', total: 5 }), /RNC/);
+});
+
+test('repartoRevision: sin facturas no revienta y da totales en cero', () => {
+  const r = repartoRevision([]);
+  assert.deepEqual(r.incluidas, []);
+  assert.equal(r.totales.total, 0);
+  assert.equal(repartoRevision(null).incluidas.length, 0);
+});
+
+test('nombreRevision606: nombre propio, no se confunde con el TXT oficial', () => {
+  assert.equal(nombreRevision606('Junio 2026'), 'Revision_606_Junio_2026.xlsx');
 });
