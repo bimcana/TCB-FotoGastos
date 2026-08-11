@@ -215,15 +215,24 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   tipo Excel (`normalizarCampoEntrada`).
 - **Generar**: por sección de mes en el acordeón → `generarDocumento(ctx)` → PDF + 606 →
   `subirOReemplazar` + hoja de compartir iOS.
-- **Paginado del PDF (Fase 14)**: el ancho de cada factura ya NO es fijo. `paginar` reparte
-  la banda (`X_INI=48`, `ANCHO_UTIL=695.25`, `HUECO=51`) dando a cada factura el ancho que
-  necesita (`alto/ratio`) para que TODAS lleguen a una misma altura, la mayor posible
-  (`alturaComun`, pura y testeada). Motivo: una factura carta (ratio 1.29) escalada a la
-  casilla vieja de 198 pt solo alcanzaba ~256 pt de alto y se veía diminuta junto a un
-  ticket; ahora toma ~306 pt de ancho y llega a los 396. Una página se cierra al superar
-  `MAX_COLUMNAS=3` **o** si al repartir alguna bajaría de `ALTURA_MIN=340`. De esa regla
-  salen solas las dos que pidió Ari: dos cartas ocupan página entera, y carta + ticket de
-  supermercado también. `generarPDF` dibuja con `it.cajas[]` (`{x,w,h}`), ya no con `xs`.
+- **Paginado del PDF — POR TAMAÑO FÍSICO DEL PAPEL (Fase 14, 2ª pasada)**. Historia, para
+  no repetir el error: la casilla fija de 198 pt dejaba una hoja carta a ~256 pt de alto,
+  diminuta junto a un ticket. El 1er intento igualó la ALTURA de todas dándoles el ancho
+  necesario — y salió el problema opuesto: **un voucher de gasolina se estiraba hasta
+  parecer tan grande como una hoja carta**. Ninguna de las dos respeta la realidad.
+  **Criterio definitivo**: se estima el tamaño FÍSICO del papel y todas las facturas de una
+  página se escalan con el MISMO factor (pt por pulgada), así el PDF conserva las
+  proporciones reales. `anchoFisico(ratio)`: por debajo de `RATIO_CARTA=1.9` es hoja
+  (`ANCHO_CARTA=8.5"`), por encima rollo de caja (`ANCHO_ROLLO=3"`) — calibrado midiendo
+  **93 facturas reales** (la frontera natural está en 1.9). El alto sale de `ancho × ratio`,
+  así que un voucher corto queda bajo y un ticket largo alto, sin identificar el comercio.
+  `factorEscala(cols)` (pura) da el mayor factor que cabe a lo ancho y no rebasa la altura
+  de banda. Extras pedidos por Ari: los **rollos** pueden estirarse hasta `ESTIRADO_MAX=1.10`
+  cuando sobra sitio (legibilidad; las hojas NUNCA se deforman) y la separación es uniforme
+  con el grupo centrado. Página se cierra al superar `MAX_COLUMNAS=3` **o** si el factor
+  bajaría de `FACTOR_MIN=30` — de ahí salen solas las reglas de Ari (2 cartas = página
+  entera; 3 no caben). Medido: carta 396 pt vs gasolina 238 pt en la misma página.
+  `generarPDF` dibuja con `it.cajas[]` (`{x,w,h}`, altura propia por caja), ya no con `xs`.
 
 ## 5b. Formato 606 sobre la plantilla oficial (Fase 14)
 
