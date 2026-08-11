@@ -22,14 +22,33 @@ function limpiarToken(){
   try { localStorage.removeItem('tcb:driveToken'); } catch(e){}
 }
 
+// Cuenta con la que se conecto la ultima vez. Se pasa a Google como `login_hint` para
+// que la renovacion no muestre el selector de cuentas (Fase 14): con una sola cuenta el
+// popup se resuelve sin toques. No es un dato sensible ni una credencial.
+const CLAVE_CUENTA = 'tcb:driveCuenta';
+export function cuentaRecordada(){
+  try { return localStorage.getItem(CLAVE_CUENTA) || ''; } catch(e){ return ''; }
+}
+export function recordarCuenta(email){
+  try { if (email) localStorage.setItem(CLAVE_CUENTA, email); } catch(e){}
+}
+
+// GIS avisa por aqui de los fallos que NO son de OAuth: sobre todo que el popup no se
+// pudo abrir o que el usuario lo cerro. Sin esto la promesa quedaba colgada hasta el
+// timeout — el caso tipico de la PWA en iOS, donde el popup se bloquea.
+let onErrorCliente = null;
+
 export function initAuth(clientId){
+  const hint = cuentaRecordada();
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: clientId,
     // Fase 4: acceso amplio (necesario para VER archivos que otros suban a la carpeta
     // matriz — drive.file solo muestra lo creado por la app). La app queda RESTRINGIDA
     // en codigo a la carpeta matriz: toda operacion parte de carpetaRaizId.
     scope: 'https://www.googleapis.com/auth/drive',
-    callback: () => {}
+    ...(hint ? { login_hint: hint } : {}),
+    callback: () => {},
+    error_callback: err => { if (onErrorCliente) onErrorCliente(err); }
   });
 }
 
@@ -59,10 +78,17 @@ export function conectar(opciones = {}){
   return new Promise((res, rej) => {
     if (!tokenClient) return rej(new Error('Falta el Client ID en Ajustes'));
     const silencioso = opciones.silencioso || conectado();
-    const timer = setTimeout(() => rej(new Error('Tiempo de espera agotado al conectar con Google')),
+    const cerrar = () => { clearTimeout(timer); onErrorCliente = null; };
+    const timer = setTimeout(() => { cerrar(); rej(new Error('Tiempo de espera agotado al conectar con Google')); },
       opciones.silencioso ? 8000 : 60000);
+    // Popup bloqueado o cerrado por el usuario: fallar YA en vez de esperar al timeout.
+    onErrorCliente = err => {
+      cerrar();
+      rej(new Error(err && err.type === 'popup_closed' ? 'Cerraste la ventana de Google'
+                  : 'No se pudo abrir la ventana de Google'));
+    };
     tokenClient.callback = t => {
-      clearTimeout(timer);
+      cerrar();
       if (t.error) return rej(new Error(t.error));
       accessToken = t.access_token;
       expiraEn = Date.now() + (t.expires_in - 60) * 1000;
@@ -71,6 +97,15 @@ export function conectar(opciones = {}){
     };
     tokenClient.requestAccessToken({ prompt: silencioso ? '' : 'consent' });
   });
+}
+
+// Correo de la cuenta conectada (para recordarla como login_hint). Mejor esfuerzo: si
+// falla no se interrumpe nada, solo se pierde el atajo del selector de cuentas.
+export async function correoDeLaCuenta(){
+  try {
+    const r = await api('about?fields=user(emailAddress)');
+    return r?.user?.emailAddress || '';
+  } catch(e){ return ''; }
 }
 
 async function api(path, opts = {}){

@@ -1,4 +1,4 @@
-const VERSION = 'fase13-v1';
+const VERSION = 'fase14-v1';
 // Los binarios de vendor/tesseract/ NO se precachean (varios MB): se cachean al usarse.
 const PRECACHE = [
   './', 'index.html', 'navegador.html', 'styles.css', 'manifest.webmanifest',
@@ -20,7 +20,9 @@ self.addEventListener('fetch', e => {
   if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) return; // API de Google va directo a red
   // Binarios grandes (Tesseract, ONNX Runtime, modelo U2-Net-p) NO van en precache: se
   // cachean al usarse por primera vez, para que OCR local e IA funcionen luego offline.
-  if (/\/vendor\/(tesseract|ort|modelos|pdf-lib|sheetjs)\//.test(e.request.url)){
+  // `dgii` = plantilla oficial del Formato 606 (Fase 14): se cachea al generar el primer
+  // Excel para que los siguientes salgan sin red.
+  if (/\/vendor\/(tesseract|ort|modelos|pdf-lib|sheetjs|dgii)\//.test(e.request.url)){
     e.respondWith(caches.open(VERSION).then(cache =>
       cache.match(e.request).then(hit => hit || fetch(e.request).then(resp => {
         if (resp.ok) cache.put(e.request, resp.clone());

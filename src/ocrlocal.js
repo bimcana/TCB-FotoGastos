@@ -19,7 +19,8 @@ const CAMPOS_VACIOS = () => ({
   nombreComercio: null,
   subtotal: null,
   itbis: null,
-  total: null
+  total: null,
+  propinaLegal: null
 });
 
 function aLineas(texto){
@@ -99,6 +100,12 @@ function extraerMontoPorEtiqueta(lineas, etiquetaRegex, excluirRegex = null){
 const RE_TOTAL_FUERTE = /total\s+a\s+pagar|total\s+general|gran\s+total|monto\s+total|total\s+rd/i;
 const RE_TOTAL_NO = /sub\s*-?\s*total|descuento|ahorro|art[ií]culos|items?\b|puntos|balance|itbis|itebis|impuesto|propina|efectivo|cambio|devuelta/i;
 
+// Propina legal del 10% (Ley 16-92) en restaurantes y servicios de comida. Etiquetas
+// reales: "Propina Legal", "10% Ley", "% Ley", "Ley 16-92". Va al 606 en la columna Y.
+const RE_PROPINA = /propina|ley\s*16\s*-?\s*92|\d{1,2}\s*%\s*ley|%\s*de\s*ley|\bley\b\s*\d{1,2}\s*%/i;
+// "Propina NO incluida"/"voluntaria" no es un monto facturado: no debe capturarse.
+const RE_PROPINA_NO = /no\s+inclu|voluntari|sin\s+propina|excluye/i;
+
 function extraerTotal(lineas){
   const fuerte = extraerMontoPorEtiqueta(lineas, RE_TOTAL_FUERTE);
   if (fuerte !== null) return fuerte;
@@ -157,7 +164,8 @@ export function parsearTextoFactura(texto, opciones = {}){
     nombreComercio: extraerNombreComercio(lineas),
     subtotal: extraerMontoPorEtiqueta(lineas, /\bsub\s*-?\s*total\b/i),
     itbis: extraerMontoPorEtiqueta(lineas, /i\.?\s?t\.?\s?e?\.?\s?b\.?\s?i\.?\s?s|itebis|impuesto/i, /exento|exenta/i),
-    total: extraerTotal(lineas)
+    total: extraerTotal(lineas),
+    propinaLegal: extraerMontoPorEtiqueta(lineas, RE_PROPINA, RE_PROPINA_NO)
   };
 }
 

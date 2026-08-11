@@ -178,6 +178,35 @@ TOTAL     1363.49`;
   assert.equal(d.total, 1363.49);
 });
 
+// --- Fase 14: propina legal (Ley 16-92) para la columna Y del 606 ---
+test('propina legal: etiquetas reales de restaurante', () => {
+  const rest = `RESTAURANTE EL BUEN SABOR SRL
+RNC 131067603
+NCF E310000025067
+SUBTOTAL        4,940.01
+ITBIS           889.20
+PROPINA LEGAL   494.00
+TOTAL A PAGAR   6,323.21`;
+  const d = parsearTextoFactura(rest);
+  assert.equal(d.propinaLegal, 494);
+  assert.equal(d.itbis, 889.20);
+  assert.equal(d.total, 6323.21);   // el total no se confunde con la propina
+});
+
+test('propina legal: variantes "10% Ley" y "Ley 16-92"', () => {
+  assert.equal(parsearTextoFactura('X\n10% LEY 250.00\nTOTAL 2750.00').propinaLegal, 250);
+  assert.equal(parsearTextoFactura('X\nLEY 16-92  73.43\nTOTAL 807.81').propinaLegal, 73.43);
+  assert.equal(parsearTextoFactura('X\n% DE LEY 45.50\nTOTAL 500.50').propinaLegal, 45.5);
+});
+
+test('propina legal: factura sin propina → null (el post-proceso lo vuelve 0)', () => {
+  assert.equal(parsearTextoFactura('FERRETERIA X\nSUBTOTAL 100.00\nITBIS 18.00\nTOTAL 118.00').propinaLegal, null);
+});
+
+test('propina legal: "propina no incluida" no es un monto facturado', () => {
+  assert.equal(parsearTextoFactura('X\nPROPINA NO INCLUIDA\nTOTAL 500.00').propinaLegal, null);
+});
+
 test('total pelado sigue funcionando cuando no hay etiqueta fuerte', () => {
   const t = 'COMERCIO X\nSUB-TOTAL 100.00\nTOTAL 118.00';
   assert.equal(parsearTextoFactura(t).total, 118);

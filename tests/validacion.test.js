@@ -198,6 +198,21 @@ test('afinarDatosFactura: descarta el RNC propio y deduce el monto faltante', ()
   assert.equal(d.total, 118);
 });
 
+// --- Fase 14: la propina legal siempre queda numerica (0 si la factura no la trae) ---
+test('afinarDatosFactura: propina ausente → 0; propina impresa se respeta', () => {
+  assert.equal(afinarDatosFactura({ total: 118 }).propinaLegal, 0);
+  assert.equal(afinarDatosFactura({ total: 118, propinaLegal: null }).propinaLegal, 0);
+  assert.equal(afinarDatosFactura({ total: 6323.21, propinaLegal: 494 }).propinaLegal, 494);
+  assert.equal(afinarDatosFactura({ total: 118, propinaLegal: -5 }).propinaLegal, 0); // negativo no es valido
+});
+
+test('afinarDatosFactura: la propina NO entra en la deduccion de montos', () => {
+  // total = subtotal + itbis; la propina va aparte (columna Y del 606)
+  const d = afinarDatosFactura({ subtotal: 4940.01, itbis: 889.20, total: null, propinaLegal: 494 });
+  assert.equal(d.total, 5829.21);
+  assert.equal(d.propinaLegal, 494);
+});
+
 test('afinarDatosFactura: RNC ajeno se conserva; null pasa de largo', () => {
   const d = afinarDatosFactura({ rncEmisor: '101796822', total: 50 }, { rncPropio: '133231824' });
   assert.equal(d.rncEmisor, '101796822');

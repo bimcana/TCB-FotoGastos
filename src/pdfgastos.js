@@ -3,36 +3,84 @@
 import { cargarScript } from './carga.js';
 
 export const PAGINA = { w: 792, h: 612 };
-export const X3 = [48, 297, 545.25];
-export const X2 = [159.75, 408];
-export const X1 = [297];
 export const CAJA = { y: 125.25, w: 198, h: 396 };  // y medido desde ARRIBA
 const ETIQ_Y = 532.5;                                // y de la etiqueta RD$ desde arriba
 const LOGO = { x: 48, y: 39.75, w: 168.75, h: 57 };
 const MEMBRETE = { x: 246.75, y: 45 };
+
+// Banda horizontal util: de la 1a casilla del PPTX (x=48) al fin de la 3a (743.25),
+// con el mismo hueco entre casillas. Con 3 columnas iguales sale el ancho historico 198.
+export const X_INI = 48;
+export const ANCHO_UTIL = 695.25;
+export const HUECO = 51;
+export const MAX_COLUMNAS = 3;
+
 // REGLA DE ALTURA (Ari, 2026-07-19): por defecto cada factura se ESCALA completa a la
-// altura de su casilla — la gran mayoria (carta, gasolinera, restaurante) NUNCA se divide.
-// Division en 2 columnas SOLO para tickets muy largos (supermercado) que escalados
-// quedarian ilegibles. Umbral calibrado con 57 facturas reales: los ratios normales
-// llegan a 3.80 y los de supermercado empiezan en 4.35 → corte en 4.
+// altura de su casilla. Division en 2 columnas SOLO para tickets muy largos (supermercado)
+// que escalados quedarian ilegibles. Umbral calibrado con 57 facturas reales: los ratios
+// normales llegan a 3.80 y los de supermercado empiezan en 4.35 → corte en 4.
 export const RATIO_LARGA = 4;
+
+// REPARTO DE ANCHO (Ari, 2026-08-11): una factura de formato carta (8.5x11 → ratio 1.29)
+// escalada a una casilla de 198x396 solo alcanza ~256 pt de alto: se ve diminuta al lado
+// de un ticket, que si llena los 396. La causa es que la casilla es fija y estrecha.
+// SOLUCION: el ancho ya no es fijo — cada factura recibe el ancho que necesita para
+// llegar a una MISMA altura, y esa altura es la mayor que permita la banda. Asi una carta
+// toma ~306 pt de ancho y llega a los 396 de alto, igual que los tickets.
+// Una pagina se cierra cuando meter la siguiente encogeria a todas por debajo de
+// ALTURA_MIN — de ahi salen solas las reglas que pidio Ari: dos cartas ocupan una pagina
+// entera, y una carta con un ticket largo tambien.
+export const ALTURA_MIN = 340;   // ~86% de la altura de banda; por debajo se ve pequeño
+
+// Columnas que ocupa una factura, con el ratio de CADA columna. El ticket largo se parte
+// en 2 mitades verticales, asi que cada mitad tiene la mitad de esbeltez.
+export function columnasDe(ratio){
+  return ratio > RATIO_LARGA ? [ratio / 2, ratio / 2] : [ratio];
+}
+
+// Altura comun maxima para un conjunto de columnas: la mayor h tal que la suma de anchos
+// (h/ratio de cada una) mas los huecos quepa en la banda. Puro.
+export function alturaComun(ratiosCol, alturaMax = CAJA.h, anchoUtil = ANCHO_UTIL, hueco = HUECO){
+  const n = ratiosCol.length;
+  if (!n) return 0;
+  const disponible = anchoUtil - (n - 1) * hueco;
+  if (disponible <= 0) return 0;
+  const suma = ratiosCol.reduce((s, r) => s + 1 / r, 0);
+  return Math.min(alturaMax, disponible / suma);
+}
+
+// Reparte una pagina ya cerrada: calcula la altura comun, el ancho de cada columna y las
+// posiciones x (el grupo queda centrado en la banda).
+function disponer(arr){
+  const ratiosCol = arr.flatMap(it => columnasDe(it.ratio));
+  const h = alturaComun(ratiosCol);
+  const anchos = ratiosCol.map(r => h / r);
+  const total = anchos.reduce((s, w) => s + w, 0) + (ratiosCol.length - 1) * HUECO;
+  let x = X_INI + (ANCHO_UTIL - total) / 2;
+  let k = 0;
+  return arr.map(it => {
+    const cajas = columnasDe(it.ratio).map(() => {
+      const caja = { x, w: anchos[k], h };
+      x += anchos[k] + HUECO;
+      k++;
+      return caja;
+    });
+    return { ...it, celdas: cajas.length, cajas, alturaCaja: h };
+  });
+}
 
 export function paginar(items){
   const paginas = [];
   let actual = [];
-  const ocupadas = arr => arr.reduce((s, x) => s + x.celdas, 0);
-  const cierra = () => { if (actual.length){ paginas.push(actual); actual = []; } };
+  const cierra = () => { if (actual.length){ paginas.push(disponer(actual)); actual = []; } };
   for (const it of items || []){
-    const celdas = it.ratio > RATIO_LARGA ? 2 : 1;
-    if (ocupadas(actual) + celdas > 3) cierra();
-    actual.push({ ...it, celdas });
+    const cols = [...actual, it].flatMap(x => columnasDe(x.ratio));
+    // Cabe si no pasa de 3 columnas Y si al repartir todas siguen viendose grandes.
+    if (actual.length && (cols.length > MAX_COLUMNAS || alturaComun(cols) < ALTURA_MIN)) cierra();
+    actual.push(it);
   }
   cierra();
-  return paginas.map(arr => {
-    const xs = ocupadas(arr) === 3 ? X3 : ocupadas(arr) === 2 ? X2 : X1;
-    let i = 0;
-    return arr.map(it => { const mias = xs.slice(i, i + it.celdas); i += it.celdas; return { ...it, xs: mias }; });
-  });
+  return paginas;
 }
 
 function fmtRD(n){
@@ -66,7 +114,8 @@ function dibujarPie(p, fuentes){
 }
 
 export async function generarPDF(paginas, empresa, mesTexto){
-  await cargarScript('vendor/pdf-lib/pdf-lib.min.js');
+  // Si pdf-lib ya esta cargado (o inyectado en pruebas) no se vuelve a pedir.
+  if (typeof PDFLib === 'undefined') await cargarScript('vendor/pdf-lib/pdf-lib.min.js');
   const { PDFDocument, StandardFonts, rgb } = PDFLib;
   _rgb = rgb;
   const doc = await PDFDocument.create();
@@ -95,18 +144,20 @@ export async function generarPDF(paginas, empresa, mesTexto){
     for (const it of items){
       const imgs = [];
       for (const bytes of it.partes) imgs.push(await doc.embedJpg(bytes));
-      it.xs.forEach((x, k) => {
+      // Cada caja trae su ancho/alto ya repartidos (ver `disponer`): la imagen se escala
+      // a lo que quepa dentro y se centra, asi que nunca se deforma ni se sale.
+      it.cajas.forEach((caja, k) => {
         const img = imgs[Math.min(k, imgs.length - 1)];
-        const esc = Math.min(CAJA.w / img.width, CAJA.h / img.height);
+        const esc = Math.min(caja.w / img.width, caja.h / img.height);
         const w = img.width * esc, h = img.height * esc;
-        p.drawImage(img, { x: x + (CAJA.w - w) / 2,
+        p.drawImage(img, { x: caja.x + (caja.w - w) / 2,
                            y: PAGINA.h - CAJA.y - CAJA.h + (CAJA.h - h) / 2,
                            width: w, height: h });
       });
       const et = fmtRD(it.total);
       const ew = fuentes.bold.widthOfTextAtSize(et, 10.5);
-      const xEt = it.xs[it.xs.length - 1]; // bajo la ultima casilla (regla de la plantilla)
-      p.drawText(et, { x: xEt + (CAJA.w - ew) / 2, y: PAGINA.h - ETIQ_Y - 10, size: 10.5, font: fuentes.bold, color: gris(0.15) });
+      const ult = it.cajas[it.cajas.length - 1]; // bajo la ultima casilla (regla de la plantilla)
+      p.drawText(et, { x: ult.x + (ult.w - ew) / 2, y: PAGINA.h - ETIQ_Y - 10, size: 10.5, font: fuentes.bold, color: gris(0.15) });
     }
     dibujarPie(p, fuentes);
   }

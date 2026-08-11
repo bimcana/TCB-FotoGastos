@@ -12,6 +12,7 @@ export function entradaDeFactura(nombreArchivo, datos, origen, duplicada, opcion
     subtotal: datos.subtotal ?? null,
     itbis: datos.itbis ?? null,
     total: datos.total ?? null,
+    propinaLegal: datos.propinaLegal ?? 0,   // columna Y del 606; 0 si la factura no la trae
     origen: origen || 'manual',
     duplicada: !!duplicada,
     subidoEn: new Date().toISOString(),
