@@ -10,12 +10,33 @@ const GASOLINA = 2.2;     // voucher Cardnet de gasolina: papel estrecho y corto
 const TICKET = 3.4;       // ticket de farmacia/restaurante, papel estrecho y largo
 const SUPER = 5;          // ticket de supermercado (se divide en dos)
 
-// Calibrado con 93 facturas reales: hasta 1.9 son hojas (8.5"), por encima rollos (~3").
+// Frontera calibrada MIRANDO las facturas reales, no solo los numeros:
+//   240.jpg ratio 1.31 = hoja carta de verdad (BM Cargo)
+//   051.jpg ratio 1.62 = GASOLINA (rollo termico de United Petroleum)
+// Con el umbral viejo (1.9) el voucher de gasolina entraba como hoja y aplastaba la pagina.
 test('anchoFisico: hoja carta vs rollo de caja', () => {
-  assert.equal(anchoFisico(CARTA), ANCHO_CARTA);
-  assert.equal(anchoFisico(1.85), ANCHO_CARTA);
-  assert.equal(anchoFisico(RATIO_CARTA), ANCHO_ROLLO);
+  assert.equal(anchoFisico(CARTA), ANCHO_CARTA);       // 1.29 carta
+  assert.equal(anchoFisico(1.414), ANCHO_CARTA);       // A4
+  assert.equal(anchoFisico(1.31), ANCHO_CARTA);        // 240.jpg, hoja real
+  assert.equal(anchoFisico(1.62), ANCHO_ROLLO);        // 051.jpg, gasolina real
+  assert.equal(anchoFisico(1.84), ANCHO_ROLLO);
   assert.equal(anchoFisico(GASOLINA), ANCHO_ROLLO);
+});
+
+test('la gasolina de ratio bajo NO se trata como hoja (caso 051.jpg)', () => {
+  // Antes: ratio 1.62 → CARTA → 8.5" de ancho → salia enorme junto a facturas mayores
+  const [pag] = paginar([f(1.62), f(3.2)]);   // gasolina + ticket mas largo
+  const gasolina = pag[0].cajas[0], ticket = pag[1].cajas[0];
+  assert.ok(Math.abs(gasolina.w - ticket.w) < 1, 'ambos son rollos: mismo ancho de papel');
+  assert.ok(ticket.h > gasolina.h, 'el ticket mas largo se ve mas alto que la gasolina');
+});
+
+test('una hoja carta junto a una gasolina: la hoja manda y llena la altura', () => {
+  const [pag] = paginar([f(1.62), f(CARTA)]);
+  const gasolina = pag[0].cajas[0], carta = pag[1].cajas[0];
+  assert.ok(carta.h > CAJA.h * 0.95, `la carta llena el frame (${carta.h})`);
+  assert.ok(carta.w > gasolina.w * 2, 'y es mucho mas ancha que el voucher');
+  assert.ok(carta.h > gasolina.h * 1.5, 'la gasolina no compite en altura');
 });
 
 test('RATIO_LARGA sigue en 4: solo el supermercado se divide', () => {
@@ -106,10 +127,11 @@ test('cabeEnPagina: la regla, en una funcion pura', () => {
   assert.equal(cabeEnPagina([sup], sup), false);              // dos supermercados: no
 });
 
-test('esCarta: la frontera esta en 1.9', () => {
-  assert.equal(esCarta(1.33), true);
-  assert.equal(esCarta(1.89), true);
+test('esCarta: la frontera esta en 1.45 (entre A4 y el voucher de gasolina)', () => {
+  assert.equal(esCarta(1.29), true);   // carta
+  assert.equal(esCarta(1.414), true);  // A4
   assert.equal(esCarta(RATIO_CARTA), false);
+  assert.equal(esCarta(1.62), false);  // gasolina real
   assert.equal(esCarta(3), false);
 });
 

@@ -222,10 +222,20 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   parecer tan grande como una hoja carta**. Ninguna de las dos respeta la realidad.
   **Criterio definitivo**: se estima el tamaño FÍSICO del papel y todas las facturas de una
   página se escalan con el MISMO factor (pt por pulgada), así el PDF conserva las
-  proporciones reales. `anchoFisico(ratio)`: por debajo de `RATIO_CARTA=1.9` es hoja
-  (`ANCHO_CARTA=8.5"`), por encima rollo de caja (`ANCHO_ROLLO=3"`) — calibrado midiendo
-  **93 facturas reales** (la frontera natural está en 1.9). El alto sale de `ancho × ratio`,
-  así que un voucher corto queda bajo y un ticket largo alto, sin identificar el comercio.
+  proporciones reales. `anchoFisico(ratio)`: por debajo de **`RATIO_CARTA=1.45`** es hoja
+  (`ANCHO_CARTA=8.5"`), por encima rollo de caja (`ANCHO_ROLLO=3"`). El alto sale de
+  `ancho × ratio`, así que un voucher corto queda bajo y un ticket largo alto, sin
+  necesidad de identificar el comercio.
+  **UMBRAL CALIBRADO MIRANDO LAS FACTURAS, no solo los números (Fase 19):** `240.jpg`
+  ratio 1.31 es una hoja carta real (BM Cargo) y `051.jpg` ratio **1.62 es una GASOLINA**
+  (rollo térmico de United Petroleum). Con el umbral anterior (1.9) los vouchers de
+  gasolina entraban como hojas, recibían 8.5" de ancho y **aplastaban al resto de la
+  página** — el bug que reportó Ari («se hizo una factura diminuta y en realidad es más
+  grande que la de gasolina»). Los formatos de hoja reales son carta (1.294) y A4 (1.414);
+  1.45 los cubre y deja fuera los vouchers. Oficio (1.647) queda como rollo a propósito:
+  es raro, y confundirlo con un voucher hace más daño que mostrarlo algo más estrecho.
+  **Lección: al calibrar un umbral por proporción, ABRIR las imágenes de los casos
+  frontera** — ver dos facturas reveló en un minuto lo que el histograma de 93 ocultaba.
   `factorEscala(cols)` (pura) da el mayor factor que cabe a lo ancho y no rebasa la altura
   de banda. Extras pedidos por Ari: los **rollos** pueden estirarse hasta `ESTIRADO_MAX=1.10`
   cuando sobra sitio (legibilidad; las hojas NUNCA se deforman) y la separación es uniforme
