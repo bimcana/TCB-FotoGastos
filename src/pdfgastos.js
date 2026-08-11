@@ -49,9 +49,31 @@ export const ANCHO_ROLLO = 3;
 // pequeño. Fue un error: dejaba facturas SOLAS en su pagina (medido con las 36 de Junio
 // 2025: 6 paginas de una sola factura). El tamaño lo resuelve `factorEscala`; cuantas
 // caben es una decision de maquetacion, no de escala.
-// Las facturas de rollo pueden ensancharse hasta un 10% cuando sobra sitio: ayuda a leer
-// el texto sin deformarlas de forma perceptible (autorizado por Ari).
-export const ESTIRADO_MAX = 1.10;
+// REALCE DE LAS PEQUEÑAS (Ari, 2026-08-11): «las facturas de gasolina pueden escalarse de
+// un 20 a 50% si el espacio lo permite, para tener una página de espaciado más uniforme».
+// Una factura que queda muy por debajo de la altura del frame CRECE mientras haya ancho
+// libre — proporcionalmente (ancho y alto a la vez), asi que no se deforma y su texto se
+// agranda igual. Sustituye al estirado del 10% que solo tocaba el ancho: da mas tamaño y
+// sin deformacion. Nunca rebasa la altura del frame ni el ancho disponible.
+export const REALCE_MAX = 1.5;
+// …pero sin borrar la jerarquia: una factura pequeña nunca llega a la altura de la mayor
+// de su pagina. Si no, un voucher acabaria pareciendo tan importante como una hoja carta,
+// que es justo lo que Ari pidio evitar antes.
+export const REALCE_TOPE_ALTURA = 0.8;
+
+// Mayor factor de crecimiento COMUN que cabe en el ancho libre, respetando el tope propio
+// de cada columna (la que ya llena la altura tiene tope 1 y no crece). Puro.
+export function realceComun(anchos, topes, anchoLibre, maximo = REALCE_MAX){
+  if (!(anchoLibre > 0)) return 1;
+  // Nunca por encima del mayor tope real: si nadie puede crecer, el resultado es 1.
+  let bajo = 1, alto = Math.max(1, Math.min(maximo, Math.max(...topes)));
+  for (let i = 0; i < 30; i++){
+    const k = (bajo + alto) / 2;
+    const extra = anchos.reduce((s, w, j) => s + w * (Math.min(k, topes[j]) - 1), 0);
+    if (extra <= anchoLibre) bajo = k; else alto = k;
+  }
+  return bajo;
+}
 
 export function esCarta(ratio){ return ratio < RATIO_CARTA; }
 
@@ -90,7 +112,7 @@ export function factorEscala(cols, alturaMax = CAJA.h, anchoUtil = ANCHO_UTIL, h
   return Math.min(disponible / sumaAncho, alturaMax / maxAlto);
 }
 
-// Reparte una pagina ya cerrada: escala con el factor comun, estira los rollos si sobra
+// Reparte una pagina ya cerrada: escala con el factor comun, realza las pequeñas si sobra
 // sitio y separa las cajas de forma uniforme (el grupo queda centrado en la banda).
 function disponer(arr){
   const cols = arr.flatMap(it => columnasDe(it.ratio));
@@ -98,13 +120,19 @@ function disponer(arr){
   const factor = factorEscala(cols);
   const anchos = cols.map(c => c.w * factor);
   const altos = cols.map(c => c.h * factor);
-  // Estirado: solo los rollos, y solo con el ancho que de verdad sobra.
-  const usado = anchos.reduce((s, w) => s + w, 0);
-  const anchoRollos = cols.reduce((s, c, i) => s + (c.ratio >= RATIO_CARTA ? anchos[i] : 0), 0);
-  const sobra = (ANCHO_UTIL - (n - 1) * HUECO) - usado;
-  const estirado = (sobra > 0 && anchoRollos > 0)
-    ? Math.min(ESTIRADO_MAX, 1 + sobra / anchoRollos) : 1;
-  cols.forEach((c, i) => { if (c.ratio >= RATIO_CARTA) anchos[i] *= estirado; });
+  // Realce proporcional de las que quedan cortas: cada una puede crecer hasta llenar la
+  // altura del frame (o hasta REALCE_MAX), con el ancho que de verdad sobra.
+  const libre = (ANCHO_UTIL - (n - 1) * HUECO) - anchos.reduce((s, w) => s + w, 0);
+  const techo = Math.max(...altos) * REALCE_TOPE_ALTURA;   // no alcanzar a la mas alta
+  const topes = altos.map(h => (h > 0
+    ? Math.max(1, Math.min(REALCE_MAX, CAJA.h / h, techo / h))
+    : 1));
+  const realce = realceComun(anchos, topes, libre);
+  cols.forEach((c, i) => {
+    const crece = Math.min(realce, topes[i]);
+    anchos[i] *= crece;
+    altos[i] *= crece;
+  });
   // Separacion uniforme entre HUECO y el doble, con el conjunto centrado.
   const usadoFinal = anchos.reduce((s, w) => s + w, 0);
   const sep = n > 1

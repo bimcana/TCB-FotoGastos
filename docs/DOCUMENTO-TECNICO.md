@@ -1,5 +1,8 @@
 # TCB FotoGastos — Documento Técnico (versión Full)
 
+> **¿Retomando el proyecto? Empieza por [CONTINUIDAD.md](CONTINUIDAD.md)** — resume el
+> estado, las decisiones y los errores ya cometidos. Este documento es el detalle técnico.
+>
 > **Para quien modifique esta app en una sesión futura (humano o agente): LEE ESTO COMPLETO
 > antes de tocar código.** Contiene la arquitectura, los contratos de datos, las reglas que
 > NO se pueden romper y los errores ya cometidos (para no repetirlos). Los specs/planes de
@@ -237,9 +240,15 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   **Lección: al calibrar un umbral por proporción, ABRIR las imágenes de los casos
   frontera** — ver dos facturas reveló en un minuto lo que el histograma de 93 ocultaba.
   `factorEscala(cols)` (pura) da el mayor factor que cabe a lo ancho y no rebasa la altura
-  de banda. Extras pedidos por Ari: los **rollos** pueden estirarse hasta `ESTIRADO_MAX=1.10`
-  cuando sobra sitio (legibilidad; las hojas NUNCA se deforman) y la separación es uniforme
-  con el grupo centrado. Medido: carta 396 pt vs gasolina 238 pt en la misma página.
+  de banda. **Realce de las pequeñas (Fase 20, pedido de Ari «pueden escalarse de un 20 a
+  50% si el espacio lo permite, para tener una página de espaciado más uniforme»):** una
+  factura que queda corta CRECE proporcionalmente (ancho y alto, sin deformar) mientras
+  haya ancho libre — `realceComun` (pura, búsqueda binaria del mayor factor común que
+  cabe). Topes: `REALCE_MAX=1.5` y `REALCE_TOPE_ALTURA=0.8` — **nunca alcanza a la más alta
+  de su página**, para no borrar la jerarquía que Ari pidió antes. Sustituyó al estirado
+  del 10%, que solo tocaba el ancho y deformaba. Medido: la gasolina pasa del 44% al 68%
+  de la altura del frame mientras carta y ticket largo siguen al 100%. La separación es
+  uniforme con el grupo centrado. Medido: carta 396 pt vs gasolina 238 pt en la misma página.
   `generarPDF` dibuja con `it.cajas[]` (`{x,w,h}`, altura propia por caja), ya no con `xs`.
 - **CUÁNTAS caben (regla de Ari, Fase 18) — `cabeEnPagina`, pura y testeada:**
   **SIEMPRE 3 facturas por página**, con dos únicas excepciones: un ticket de supermercado
