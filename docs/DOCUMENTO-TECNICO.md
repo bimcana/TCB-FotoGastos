@@ -234,6 +234,36 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   entera; 3 no caben). Medido: carta 396 pt vs gasolina 238 pt en la misma página.
   `generarPDF` dibuja con `it.cajas[]` (`{x,w,h}`, altura propia por caja), ya no con `xs`.
 
+## 5c. Archivo .TXT de envío a la DGII (Fase 16) — EL ENTREGABLE REAL
+
+**Lo que la DGII recibe NO es el Excel: es un `.TXT`.** La herramienta Excel solo existe
+para producirlo con su botón «Generar Archivo». Ari no podía ni abrir los .xls de su
+contable (Vista Protegida, «File error: data may have been lost», macros bloqueadas por
+Microsoft, control `cmdValidar` roto), así que la app lo genera directo: sin Excel, sin
+macros y sin nada que Office pueda bloquear.
+
+**FUENTE DE VERDAD: el propio VBA de la herramienta oficial.** Se extrajo el
+`vbaProject.bin` de la plantilla y se descomprimió (MS-OVBA) para leer el módulo
+`modServicios` → `cmdGenerarArchivo`. De ahí, literalmente:
+
+- Cabecera: `"606|" & RNC & "|" & Periodo & "|" & Registros` (para periodos ≥ 201501; el
+  formato viejo añadía el monto total — no aplica).
+- Detalle: **23 campos** separados por `|`, en el orden de las columnas B..Z.
+- Fechas: `ConcatFecha_one(AAAAMM, dia)` = `AAAAMM & Format$(dia,"00")` → **AAAAMMDD**.
+- **`Mid(...,1,2)`** en tipo de bienes, tipo de retención y forma de pago: al TXT va SOLO
+  el código de dos dígitos (`02`, `01`), nunca la etiqueta larga.
+- Montos: `Trim(.Cells(...))` = el VALOR, así que van sin separador de miles, con punto
+  decimal y sin ceros de relleno (`3050`, no `3,050.00`). Réplica: `montoTXT`.
+- La última línea se imprime con `Print #1, x;` (punto y coma) → **el archivo no termina
+  en salto de línea**; las demás llevan CRLF.
+- Nombre: `DGII_F_606_{RNC}_{AAAAMM}.TXT` en mayúsculas.
+
+Implementado en f606.js con funciones puras y testeadas: `montoTXT`, `fechaTXT`,
+`lineaTXT606`, `generarTXT606`, `nombreTXT606`. **Si alguna vez la DGII rechaza el
+archivo, la comparación se hace contra ese VBA, no contra suposiciones.**
+Se generan los TRES archivos por mes: PDF (revisión visual), .xlsx (lectura de
+contabilidad) y **.TXT (el que se sube)**.
+
 ## 5b. Formato 606 sobre la plantilla oficial (Fase 14)
 
 El Excel del 606 ya NO es un libro inventado: se RELLENA la plantilla oficial de la DGII

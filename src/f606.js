@@ -72,6 +72,87 @@ export function nombreArchivo606(rncEmpresa, periodo){
   return `DGII_F_606_${rnc}_${per}.xlsx`;
 }
 
+// El archivo que se sube a la Oficina Virtual va en MAYUSCULAS y termina en .TXT.
+export function nombreTXT606(rncEmpresa, periodo){
+  return nombreArchivo606(rncEmpresa, periodo).replace(/\.xlsx$/, '.TXT');
+}
+
+// --- ARCHIVO DE ENVIO .TXT (Fase 16) --------------------------------------
+// ESTE es el entregable real: la herramienta Excel de la DGII solo sirve para producirlo
+// con su boton «Generar Archivo». La app lo genera directo, sin Excel ni macros.
+//
+// FUENTE DE VERDAD: el codigo VBA de la propia herramienta oficial (modulo `modServicios`,
+// `Sub` del boton `cmdGenerarArchivo`), extraido y descomprimido de la plantilla. De ahi
+// salen, literalmente:
+//   Cabecera:  "606|" & RNC & "|" & Periodo & "|" & CantidadRegistros
+//   Detalle:   23 campos separados por "|" en el orden de las columnas B..Z
+//   Fechas:    ConcatFecha_one(AAAAMM, dia) = AAAAMM & Format$(dia,"00")  → AAAAMMDD
+//   Recortes:  Tipo de bienes, tipo de retencion y forma de pago van con `Mid(...,1,2)`,
+//              es decir SOLO el codigo de dos digitos ("02", "01"), no la etiqueta.
+//   Cierre:    la ultima linea se imprime con `Print #1, x;` (punto y coma) → el archivo
+//              NO termina en salto de linea. Las demas llevan CRLF.
+
+// Monto tal como lo escribe VBA (`Trim(.Cells(...))` = valor, no texto con formato):
+// sin separador de miles, con punto decimal y sin decimales de relleno. Vacio si no hay.
+export function montoTXT(n){
+  if (n == null || n === '') return '';
+  const v = Math.round(Number(n) * 100) / 100;
+  return Number.isFinite(v) ? String(v) : '';
+}
+
+// AAAAMM + dia a 2 digitos (equivalente a ConcatFecha_one). Sin dia, queda solo AAAAMM.
+export function fechaTXT(aaaamm, dia){
+  const base = String(aaaamm || '');
+  if (!base) return '';
+  return dia == null || dia === '' ? base : base + String(dia).padStart(2, '0');
+}
+
+// Los 23 campos de una linea de detalle, en el orden exacto de la macro.
+export function lineaTXT606(f){
+  return [
+    f.rnc,                                   // 1  RNC o Cedula
+    f.tipoId,                                // 2  Tipo Id
+    String(f.tipoBienes || '').slice(0, 2),  // 3  Tipo de bienes: SOLO el codigo
+    f.ncf,                                   // 4  NCF
+    f.ncfModificado || '',                   // 5  NCF o documento modificado
+    fechaTXT(f.fechaComprobante, f.dia),     // 6  Fecha comprobante AAAAMMDD
+    '',                                      // 7  Fecha de pago (no la maneja la app)
+    montoTXT(f.montoFacturado),              // 8  Monto facturado en servicios
+    '',                                      // 9  Monto facturado en bienes
+    montoTXT(f.montoFacturado ?? 0),         // 10 Total monto facturado (CALCULADO 8+9: nunca vacio)
+    montoTXT(f.itbisFacturado),              // 11 ITBIS facturado
+    '',                                      // 12 ITBIS retenido
+    '',                                      // 13 ITBIS sujeto a proporcionalidad
+    '',                                      // 14 ITBIS llevado al costo
+    montoTXT(f.itbisFacturado ?? 0),         // 15 ITBIS por adelantar (CALCULADO 11-14: nunca vacio)
+    '',                                      // 16 ITBIS percibido en compras
+    '',                                      // 17 Tipo de retencion en ISR
+    '',                                      // 18 Monto retencion renta
+    '',                                      // 19 ISR percibido en compras
+    '',                                      // 20 Impuesto selectivo al consumo
+    '',                                      // 21 Otros impuestos/tasas
+    montoTXT(f.propinaLegal),                // 22 Monto propina legal
+    String(f.formaPago || '').slice(0, 2)    // 23 Forma de pago: SOLO el codigo
+  ].join('|');
+}
+
+/**
+ * Archivo de envio completo. Devuelve el texto tal cual lo escribiria la herramienta:
+ * cabecera + una linea por factura, separadas por CRLF y SIN salto final.
+ */
+export function generarTXT606(filas, empresa, periodo){
+  const rnc = String(empresa?.rnc || '').replace(/\D/g, '');
+  const per = String(periodo || '').replace('-', '');
+  const cabecera = `606|${rnc}|${per}|${filas.length}`;
+  // Sin filas, la macro solo hace `Print #1, strHeader` — que SI cierra con CRLF.
+  if (!filas.length) return cabecera + '\r\n';
+  return [cabecera, ...filas.map(lineaTXT606)].join('\r\n');
+}
+
+export function blobTXT606(texto){
+  return new Blob([texto], { type: 'text/plain;charset=utf-8' });
+}
+
 // Anchos de columna (se pierden al derivar la plantilla; se reponen para que la hoja
 // abra legible). Indices 0..25 = A..Z.
 const ANCHOS = [
