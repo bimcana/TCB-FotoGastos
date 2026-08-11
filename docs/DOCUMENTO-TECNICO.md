@@ -229,10 +229,17 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   `factorEscala(cols)` (pura) da el mayor factor que cabe a lo ancho y no rebasa la altura
   de banda. Extras pedidos por Ari: los **rollos** pueden estirarse hasta `ESTIRADO_MAX=1.10`
   cuando sobra sitio (legibilidad; las hojas NUNCA se deforman) y la separación es uniforme
-  con el grupo centrado. Página se cierra al superar `MAX_COLUMNAS=3` **o** si el factor
-  bajaría de `FACTOR_MIN=30` — de ahí salen solas las reglas de Ari (2 cartas = página
-  entera; 3 no caben). Medido: carta 396 pt vs gasolina 238 pt en la misma página.
+  con el grupo centrado. Medido: carta 396 pt vs gasolina 238 pt en la misma página.
   `generarPDF` dibuja con `it.cajas[]` (`{x,w,h}`, altura propia por caja), ya no con `xs`.
+- **CUÁNTAS caben (regla de Ari, Fase 18) — `cabeEnPagina`, pura y testeada:**
+  **SIEMPRE 3 facturas por página**, con dos únicas excepciones: un ticket de supermercado
+  (se lleva 2 de las 3 columnas) y **dos hojas carta juntas** (llenan la página entre las
+  dos; no entra una tercera). **ERROR YA COMETIDO, no repetirlo:** hubo un umbral
+  `FACTOR_MIN=30` que cerraba la página cuando al repartir todo quedaba pequeño, y dejaba
+  facturas SOLAS — medido con las 36 de Junio 2025: 17 páginas, 6 de ellas con una única
+  factura. El tamaño lo resuelve `factorEscala`; **cuántas caben es maquetación, no
+  escala**: son decisiones separadas y mezclarlas rompió el PDF. Tras el arreglo, las
+  mismas 36 facturas dan 12 páginas, todas de 3.
 
 ## 5c. Los TRES entregables del cierre de mes (Fase 17)
 

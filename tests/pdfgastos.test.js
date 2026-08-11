@@ -1,8 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { paginar, columnasDe, factorEscala, anchoFisico, RATIO_LARGA, RATIO_CARTA,
-         FACTOR_MIN, ESTIRADO_MAX, CAJA, ANCHO_UTIL, X_INI, HUECO, MAX_COLUMNAS,
-         ANCHO_CARTA, ANCHO_ROLLO } from '../src/pdfgastos.js';
+import { paginar, columnasDe, factorEscala, anchoFisico, esCarta, cabeEnPagina,
+         RATIO_LARGA, RATIO_CARTA, ESTIRADO_MAX, CAJA, ANCHO_UTIL, X_INI, HUECO,
+         MAX_COLUMNAS, ANCHO_CARTA, ANCHO_ROLLO } from '../src/pdfgastos.js';
 
 const f = (ratio = 2) => ({ archivo: 'a', total: 1, ratio });
 const CARTA = 11 / 8.5;   // 1.29 — hoja carta completa
@@ -64,10 +64,53 @@ test('dos tickets estrechos dejan sitio para un tercero (caso de la imagen 2)', 
   assert.equal(p[0].length, 3);
 });
 
+// --- REGLA DE LLENADO (Ari): SIEMPRE 3 por pagina, salvo supermercado o dos cartas ---
+
+test('tres facturas normales SIEMPRE van juntas en una pagina', () => {
+  const p = paginar([f(2.3), f(2.03), f(2.23)]);
+  assert.equal(p.length, 1);
+  assert.equal(p[0].length, 3);
+});
+
+test('NINGUNA factura normal se queda sola en su pagina (la regresion que vio Ari)', () => {
+  // Mezcla real de Junio 2025 que antes producia paginas de una sola factura
+  const ratios = [2.3, 2.03, 2.23, 2.1, 3.96, 1.62, 2.23, 3.23, 2.37, 2.44, 3, 3.2,
+                  3.55, 1.84, 2.67, 2.96, 1.88, 2.26];
+  for (const pag of paginar(ratios.map(f))){
+    const soloUna = pag.length === 1 && pag[0].celdas === 1;
+    assert.ok(!soloUna, `factura sola con ratio ${pag[0].ratio}`);
+  }
+});
+
+test('una carta con dos tickets caben las tres', () => {
+  const p = paginar([f(CARTA), f(TICKET), f(GASOLINA)]);
+  assert.equal(p.length, 1);
+  assert.equal(p[0].length, 3);
+});
+
 test('DOS cartas ocupan la pagina entera; una tercera no cabe', () => {
   const p = paginar([f(CARTA), f(CARTA), f(TICKET)]);
   assert.equal(p[0].length, 2);
   assert.equal(p[1].length, 1);
+});
+
+test('cabeEnPagina: la regla, en una funcion pura', () => {
+  const carta = f(CARTA), rollo = f(TICKET), sup = f(SUPER);
+  assert.equal(cabeEnPagina([rollo, rollo], rollo), true);    // 3 normales: si
+  assert.equal(cabeEnPagina([rollo, rollo, rollo], rollo), false); // 4: no
+  assert.equal(cabeEnPagina([carta, rollo], rollo), true);    // carta + 2 rollos: si
+  assert.equal(cabeEnPagina([carta, carta], rollo), false);   // 2 cartas: cerrado
+  assert.equal(cabeEnPagina([carta], carta), true);           // 2 cartas juntas: si
+  assert.equal(cabeEnPagina([rollo], sup), true);             // rollo + supermercado (3 col)
+  assert.equal(cabeEnPagina([rollo, rollo], sup), false);     // se pasaria de 3 columnas
+  assert.equal(cabeEnPagina([sup], sup), false);              // dos supermercados: no
+});
+
+test('esCarta: la frontera esta en 1.9', () => {
+  assert.equal(esCarta(1.33), true);
+  assert.equal(esCarta(1.89), true);
+  assert.equal(esCarta(RATIO_CARTA), false);
+  assert.equal(esCarta(3), false);
 });
 
 test('carta + supermercado: solo esos dos, la siguiente carta salta de pagina', () => {
@@ -122,10 +165,12 @@ test('nunca mas de 3 columnas por pagina', () => {
     assert.ok(p.reduce((s, i) => s + i.celdas, 0) <= MAX_COLUMNAS);
 });
 
-test('factorEscala: dos cartas caben juntas, tres no (regla de Ari)', () => {
-  assert.ok(factorEscala(columnasDe(CARTA).concat(columnasDe(CARTA))) >= FACTOR_MIN);
-  const tres = columnasDe(CARTA).concat(columnasDe(CARTA), columnasDe(CARTA));
-  assert.ok(factorEscala(tres) < FACTOR_MIN);
+test('factorEscala: mas facturas en la pagina → todo se escala mas pequeño', () => {
+  const una = factorEscala(columnasDe(CARTA));
+  const dos = factorEscala(columnasDe(CARTA).concat(columnasDe(CARTA)));
+  assert.ok(una >= dos, 'con dos cartas el factor no sube');
+  // Con dos cartas la altura sigue siendo la maxima posible de la banda
+  assert.ok(dos * ANCHO_CARTA * CARTA >= CAJA.h - 0.01);
 });
 
 test('paginar sin items o con lista vacia no revienta', () => {
