@@ -180,7 +180,7 @@ async function procesarYRevisar(){
 window.procesarYRevisar = procesarYRevisar;
 
 // Tarjeta de datos de la factura: OCR con Gemini + campos editables + validación + duplicado (Task 4)
-const CAMPOS_IDS = ['c-fecha', 'c-ncf', 'c-rnc', 'c-comercio', 'c-subtotal', 'c-itbis', 'c-total'];
+const CAMPOS_IDS = ['c-fecha', 'c-ncf', 'c-rnc', 'c-comercio', 'c-subtotal', 'c-propina', 'c-itbis', 'c-total'];
 
 // Token de generación: descarta lecturas de Gemini obsoletas si el usuario re-procesa
 // (p. ej. ajusta esquinas) mientras una lectura previa sigue en vuelo.
@@ -201,6 +201,8 @@ function normalizarEnCampos(datos){
   document.getElementById('c-rnc').value = datos.rncEmisor || '';
   document.getElementById('c-comercio').value = datos.nombreComercio || '';
   document.getElementById('c-subtotal').value = montoValido(datos.subtotal) ? formatearMonto(datos.subtotal) : '';
+  // La propina va SIEMPRE con valor (0 si la factura no la trae): el 606 la exige numerica.
+  document.getElementById('c-propina').value = formatearMonto(montoValido(datos.propinaLegal) ? datos.propinaLegal : 0);
   document.getElementById('c-itbis').value = montoValido(datos.itbis) ? formatearMonto(datos.itbis) : '';
   document.getElementById('c-total').value = montoValido(datos.total) ? formatearMonto(datos.total) : '';
 }
@@ -213,6 +215,7 @@ function leerCampos(){
     rncEmisor: document.getElementById('c-rnc').value.trim(),
     nombreComercio: document.getElementById('c-comercio').value.trim(),
     subtotal: num(document.getElementById('c-subtotal').value),
+    propinaLegal: num(document.getElementById('c-propina').value) ?? 0,
     itbis: num(document.getElementById('c-itbis').value),
     total: num(document.getElementById('c-total').value)
   };
@@ -375,7 +378,7 @@ function normalizarCampoEntrada(id){
   if (/fecha/.test(id)){
     const f = normalizarFecha(v);
     if (f) el.value = formatearFechaDO(f);        // 17072026 → 17-07-2026
-  } else if (/subtotal|itbis|total/.test(id)){
+  } else if (/subtotal|propina|itbis|total/.test(id)){
     const n = normalizarMontoTexto(v);
     if (n != null) el.value = formatearMonto(n);  // 2500 → 2,500.00
   }
@@ -870,9 +873,10 @@ import { initAuth, conectar, conectado, asegurarCarpeta, buscarCarpeta, listarNo
          buscarArchivo, moverYRenombrar, nombreDe, alDesconectar, subirOReemplazar,
          listarArchivos, listarCarpetas, descargarPorId, moverAPapelera, ponerDescripcion,
          carpetasCompartidas, crearCarpeta, moverACarpeta, porExpirar,
-         debeMostrarReconectar, esErrorDePermiso, quitarDeCarpeta } from './drive.js';
+         debeMostrarReconectar, esErrorDePermiso, quitarDeCarpeta,
+         correoDeLaCuenta, recordarCuenta } from './drive.js';
 import { paginar, generarPDF, RATIO_LARGA } from './pdfgastos.js';
-import { filas606, generarXLSX606 } from './f606.js';
+import { filas606, generarXLSX606, nombreArchivo606 } from './f606.js';
 
 import { CLIENT_ID_APP } from './config.js';
 
@@ -901,6 +905,8 @@ async function postConexion(){
   set('carpetaRaizId', raizId);
   pintarRutaCarpeta();
   set('driveConectadoAntes', true); // habilita la reconexion silenciosa al abrir
+  // Recordar la cuenta para que la proxima renovacion no muestre el selector (login_hint).
+  correoDeLaCuenta().then(recordarCuenta).catch(() => {});
   // Hereda el membrete guardado en la nube si esta instalacion no lo tiene aun.
   if (!empresaCompleta(empresaGuardada())){
     try {
@@ -1643,7 +1649,9 @@ async function generarDocumento(ctx){
     const xlsxBlob = await generarXLSX606(filas606(todas, periodo), emp, periodo, mesTexto);
     txtBar.textContent = 'Generando — subiendo a Drive…';
     const nombrePDF = `Gastos_${mesTexto.replace(' ', '_')}.pdf`;
-    const nombreXLSX = `606_${mesTexto.replace(' ', '_')}.xlsx`;
+    // Nombre con el patron de la DGII (DGII_F_606_{RNC}_{AAAAMM}.xlsx): la contabilidad
+    // lo reconoce igual que el que descarga de la oficina virtual.
+    const nombreXLSX = nombreArchivo606(emp.rnc, periodo);
     await subirOReemplazar(pdfBlob, nombrePDF, ctx.mesId);
     await subirOReemplazar(xlsxBlob, nombreXLSX, ctx.mesId);
     const archivos = [
@@ -1685,7 +1693,8 @@ async function procesarAjena(ctx, nombre){
 }
 
 // ---------- Confirmación de una factura pendiente (panel de revisión) ----------
-const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-itbis':'itbis','rv-total':'total' };
+const RV_CAMPOS = { 'rv-fecha':'fechaEmision','rv-ncf':'ncf','rv-rnc':'rncEmisor','rv-comercio':'nombreComercio','rv-subtotal':'subtotal','rv-propina':'propinaLegal','rv-itbis':'itbis','rv-total':'total' };
+const RV_MONTOS = ['subtotal', 'propinaLegal', 'itbis', 'total'];
 let rvArchivo = null;
 
 // El panel de revision corrige la entrada igual que la tarjeta de captura (tipo Excel).
@@ -1725,9 +1734,10 @@ function rellenarPanel(f){
   for (const [id, campo] of Object.entries(RV_CAMPOS)){
     const v = f[campo];
     document.getElementById(id).value =
-      v == null ? ''
+      campo === 'propinaLegal' ? formatearMonto(montoValido(v) ? v : 0) // siempre numerica
+      : v == null ? ''
       : campo === 'fechaEmision' ? formatearFechaDO(v)
-      : ['subtotal','itbis','total'].includes(campo) ? formatearMonto(v)
+      : RV_MONTOS.includes(campo) ? formatearMonto(v)
       : v;
   }
 }
@@ -1760,7 +1770,9 @@ async function confirmarRevision(){
   const edits = {};
   for (const [id, campo] of Object.entries(RV_CAMPOS)){
     const v = document.getElementById(id).value.trim();
-    edits[campo] = ['subtotal','itbis','total'].includes(campo) ? num(v) : (v || null);
+    edits[campo] = campo === 'propinaLegal' ? (num(v) ?? 0)
+                 : RV_MONTOS.includes(campo) ? num(v)
+                 : (v || null);
   }
   const btn = document.getElementById('rv-confirmar');
   btn.disabled = true; btn.textContent = 'Guardando…';
@@ -1836,7 +1848,7 @@ async function leerConIAAhora(motor = 'auto'){
     if (!datos) return toast('Sin conexión y sin OCR disponible — intenta luego');
     datos = afinarDatosFactura(datos, { rncPropio }); // deduce el monto faltante y descarta el RNC propio
     const res = await actualizarEntradaConReArchivo(ctx.mesId, archivo, f => {
-      for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'itbis', 'total']){
+      for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'propinaLegal', 'itbis', 'total']){
         if (datos[c] != null && datos[c] !== '') f[c] = datos[c];
       }
       if (motorUsado === 'gemini') f.revisadaIA = true;

@@ -10,7 +10,8 @@ const ESQUEMA = {
     nombreComercio: { type: 'string', description: 'Nombre del comercio/proveedor que emite.' },
     subtotal:       { type: 'number' },
     itbis:          { type: 'number', description: 'Monto de ITBIS.' },
-    total:          { type: 'number', description: 'Total a pagar.' }
+    total:          { type: 'number', description: 'Total a pagar.' },
+    propinaLegal:   { type: 'number', description: 'Propina legal del 10% (etiquetas "Propina Legal", "10% Ley", "Ley 16-92"). Solo restaurantes y servicios de comida; si no aparece impresa, null.' }
   },
   required: ['fechaEmision', 'ncf', 'total']
 };
@@ -26,6 +27,9 @@ const PROMPT =
   '(7) Devuelve subtotal e itbis solo si están impresos (no los calcules). ' +
   '(8) La cabecera de un voucher de tarjeta trae la marca del verifón/procesador (CARDNET, VERIFONE, ' +
   '«NOS UNE», PORTAL, VisaNet): eso NUNCA es nombreComercio — el comercio aparece después. ' +
+  '(9) propinaLegal es la propina legal del 10% que cobran restaurantes y servicios de comida, ' +
+  'impresa como "Propina Legal", "10% Ley", "% Ley" o "Ley 16-92"; devuélvela SOLO si está impresa ' +
+  'como línea aparte, nunca la calcules ni la confundas con el ITBIS. ' +
   'Si un dato no aparece, usa null.';
 
 // opciones.rncCliente: RNC del perfil de Empresa (el comprador). Se le dice al modelo
@@ -56,7 +60,8 @@ export function parseRespuesta(json){
       nombreComercio: d.nombreComercio ?? null,
       subtotal: num(d.subtotal),
       itbis: num(d.itbis),
-      total: num(d.total)
+      total: num(d.total),
+      propinaLegal: num(d.propinaLegal)
     };
   } catch(e){ return null; }
 }

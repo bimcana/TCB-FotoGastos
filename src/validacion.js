@@ -105,6 +105,9 @@ export function afinarDatosFactura(datos, opciones = {}){
   const propio = String(opciones.rncPropio || '').replace(/\D/g, '');
   const rnc = String(d.rncEmisor || '').replace(/\D/g, '');
   if (propio && rnc && rnc === propio) d.rncEmisor = null;
+  // Propina legal (Ley 16-92): solo la traen restaurantes y servicios de comida. Si no
+  // viene impresa, es 0 — no "desconocida" (decision de Ari): el 606 la necesita numerica.
+  d.propinaLegal = montoValido(d.propinaLegal) ? d.propinaLegal : 0;
   return deducirMontos(d);
 }
 

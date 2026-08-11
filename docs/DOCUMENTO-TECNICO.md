@@ -39,13 +39,14 @@ y el Excel Formato 606. Multi-usuario sobre una carpeta compartida. La versión 
 | `drive.js` | API Drive v3: token persistente, picker de carpetas, papelera, description | no |
 | `queue.js`/`revision.js` | colas IndexedDB (subida offline / revisión IA) | no |
 | `pdfgastos.js` | `paginar` (puro) + `generarPDF` (pdf-lib); exporta `RATIO_LARGA` | paginar sí |
-| `f606.js` | `filas606` (puro) + `generarXLSX606` (SheetJS) | filas sí |
+| `f606.js` | `filas606`/`tipoId`/`montoFacturado`/`nombreArchivo606` (puros) + `generarXLSX606` que RELLENA la plantilla oficial DGII | puros sí |
 | `empresa.js` | perfil membrete + `_empresa.json` | `empresaCompleta` sí |
 | `carga.js` | loader perezoso de UMD vendorizados | no |
 | `config.js` | `CLIENT_ID_APP` (público por diseño) | — |
 
 Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2netp.onnx`
-(IA recorte), `tesseract/` (OCR), `pdf-lib/`, `sheetjs/`.
+(IA recorte), `tesseract/` (OCR), `pdf-lib/`, `sheetjs/`, **`dgii/formato606-base.xlsx`**
+(63 KB, plantilla oficial del 606 — ver §7).
 
 ## 3. Contratos de datos (romperlos = corromper datos fiscales)
 
@@ -173,6 +174,21 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   línea: antes lo hacía al final, así que si fallaba a mitad (carpeta inaccesible,
   `_empresa.json` ilegible) el botón quedaba visible con Drive conectado — el bug de
   campo. `mostrarAvisoReconectar` también se auto-anula si `conectado()`.
+  **Fase 14 — POR QUÉ NO SE PUEDE ELIMINAR LA RECONEXIÓN (investigado 2026-08-11):** Google
+  NO emite refresh tokens a clientes públicos de navegador. Su documento de descubrimiento
+  OIDC declara `token_endpoint_auth_methods_supported: ["client_secret_post",
+  "client_secret_basic"]` — el método `none` (cliente público) no existe, así que PKCE sin
+  `client_secret` tampoco sirve. La duración (~3600 s) la fija Google y no es configurable.
+  En la PWA de iOS agravan dos cosas documentadas: WebKit aísla el almacén de la app de
+  pantalla de inicio (la sesión de Google de Safari no se comparte) y `window.opener` es
+  `null` en popups de WKWebView desde iOS 17.5, así que el callback de GIS puede no llegar.
+  Mitigaciones aplicadas (sin backend): `login_hint` con la cuenta recordada
+  (`cuentaRecordada`/`recordarCuenta`, correo vía `correoDeLaCuenta`) para saltar el
+  selector, y `error_callback` de GIS para fallar al instante cuando el popup se bloquea o
+  se cierra, en vez de esperar al timeout. **La única solución de raíz sin servidor de
+  terceros sería un Google Apps Script desplegado como Web App (`executeAs: USER_DEPLOYING`)
+  que escriba en Drive; eliminaría el OAuth de la PWA por completo. Es un cambio de
+  arquitectura pendiente de decisión de Ari.**
 - **Lectura Fase 8 (calidad de OCR/IA)**: la lectura NO usa el filtro visual activo —
   `canvasParaLectura(motor)` en main.js da a cada motor su mejor estado de imagen desde
   `canvasPlano` con intensidad 65: Gemini → 'color' (auto-color), Tesseract → 'grises';
@@ -199,6 +215,49 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   tipo Excel (`normalizarCampoEntrada`).
 - **Generar**: por sección de mes en el acordeón → `generarDocumento(ctx)` → PDF + 606 →
   `subirOReemplazar` + hoja de compartir iOS.
+- **Paginado del PDF (Fase 14)**: el ancho de cada factura ya NO es fijo. `paginar` reparte
+  la banda (`X_INI=48`, `ANCHO_UTIL=695.25`, `HUECO=51`) dando a cada factura el ancho que
+  necesita (`alto/ratio`) para que TODAS lleguen a una misma altura, la mayor posible
+  (`alturaComun`, pura y testeada). Motivo: una factura carta (ratio 1.29) escalada a la
+  casilla vieja de 198 pt solo alcanzaba ~256 pt de alto y se veía diminuta junto a un
+  ticket; ahora toma ~306 pt de ancho y llega a los 396. Una página se cierra al superar
+  `MAX_COLUMNAS=3` **o** si al repartir alguna bajaría de `ALTURA_MIN=340`. De esa regla
+  salen solas las dos que pidió Ari: dos cartas ocupan página entera, y carta + ticket de
+  supermercado también. `generarPDF` dibuja con `it.cajas[]` (`{x,w,h}`), ya no con `xs`.
+
+## 5b. Formato 606 sobre la plantilla oficial (Fase 14)
+
+El Excel del 606 ya NO es un libro inventado: se RELLENA la plantilla oficial de la DGII
+`vendor/dgii/formato606-base.xlsx` (derivada de «Formato de Envío 606 NG-07-2018 y
+05-2019»; 63 KB tras quitarle las ~10.000 filas de datos vacías). Mapeo **verificado
+celda a celda contra el ejemplar real de la contabilidad** (`DGII_F_606_133231824_202606.xls`):
+
+| Celda | Contenido |
+|---|---|
+| `C4` / `C5` / `C6` | RNC de la empresa (**texto**) / periodo AAAAMM / nº de registros |
+| Fila 11 | encabezados oficiales (no tocar). Datos desde la **fila 12** |
+| `A` `B` `C` `D` | línea · RNC-cédula del proveedor (**texto**) · Tipo Id (1 RNC / 2 cédula) · `TIPO_BIENES` |
+| `E` `G` `H` | NCF · fecha AAAAMM · día |
+| `K` `M` `N` `R` | monto en servicios · total facturado (=K) · ITBIS · ITBIS por adelantar (=N) |
+| `Y` `Z` | propina legal (solo si > 0) · `FORMA_PAGO` |
+
+Reglas que NO se pueden romper:
+1. **`B` y `C4` son de tipo texto**: las cédulas empiezan por 0 (`01200156113`) y como
+   número se perdería. Igual `G` lleva formato `@`.
+2. **`M` es el monto SIN ITBIS**, no el total pagado (comprobado: fila con K=4940.01,
+   N=889.20, Y=494 tiene M=4940.01).
+3. Todo el monto va a **servicios (K)**; bienes (L) queda vacío — así lo hace el ejemplar
+   en sus 20 filas. Si contabilidad lo cambia, se ajusta en `filas606`.
+4. `Y` solo se escribe cuando hay propina, como el ejemplar (en los datos internos
+   `propinaLegal` es 0, nunca null).
+5. El archivo se genera como **.xlsx sin macros a propósito**: Office bloquea los archivos
+   con macros descargados de internet — el propio ejemplar de la DGII no abre desde una
+   carpeta temporal por eso. Si contabilidad necesita los botones de la herramienta
+   oficial, copia las filas a su plantilla con macros.
+6. Nombre: `nombreArchivo606` → `DGII_F_606_{RNC}_{AAAAMM}.xlsx`, el patrón de la DGII.
+
+Verificado abriendo el resultado con Excel real (COM): abre sin avisos, cabecera y
+encabezados intactos, cédula con su cero inicial y propina en su fila.
 
 ## 6. Desarrollo y pruebas
 
