@@ -64,15 +64,23 @@ const ES_IMAGEN = /image\/(jpeg|png|webp|heic|heif)/i;
 // Compara el indice con los archivos reales de la carpeta (con sus description):
 // - imagen con nombre de la app o con description valida ausente del indice → RESTAURAR
 //   (re-chequeando duplicado por NCF contra el indice que se va construyendo);
-// - imagen sin datos y fuera del indice → "Sin procesar".
-// Puro e inmutable: devuelve { indice, restauradas, sinProcesar }.
+// - imagen sin datos y fuera del indice → "Sin procesar";
+// - entrada del indice cuya imagen YA NO ESTA en Drive → HUERFANA, se quita (Fase 22).
+// Puro e inmutable: devuelve { indice, restauradas, sinProcesar, huerfanas }.
+//
+// Las huerfanas aparecen cuando alguien borra la factura directamente en Drive: antes la
+// entrada se quedaba en `_gastos.json` para siempre, Gastos la seguia mostrando sin
+// miniatura, no se dejaba borrar y el cierre del mes fallaba al no encontrar la imagen.
+// SALVAGUARDA: si la lista de archivos llega VACIA no se quita nada — una respuesta
+// incompleta de Drive (o un fallo de red) no puede vaciar el indice del mes.
 export function conciliarIndice(indice, archivos){
   const base = (indice && Array.isArray(indice.facturas)) ? indice : { facturas: [] };
   let out = { ...base, facturas: [...base.facturas] };
   const indexados = new Set(out.facturas.map(f => f.archivo));
   const restauradas = [];
   const sinProcesar = [];
-  for (const a of archivos || []){
+  const lista = archivos || [];
+  for (const a of lista){
     if (!ES_IMAGEN.test(a.mimeType || '')) continue;
     if (indexados.has(a.name)) continue;
     const entrada = entradaDeDesc(a.description);
@@ -86,5 +94,12 @@ export function conciliarIndice(indice, archivos){
       sinProcesar.push(a.name);
     }
   }
-  return { indice: out, restauradas, sinProcesar };
+  // Entradas sin archivo en Drive: se sacan del indice para que la app refleje la realidad.
+  let huerfanas = [];
+  if (lista.length){
+    const enDrive = new Set(lista.filter(a => ES_IMAGEN.test(a.mimeType || '')).map(a => a.name));
+    huerfanas = out.facturas.filter(f => !enDrive.has(f.archivo));
+    if (huerfanas.length) out = { ...out, facturas: out.facturas.filter(f => enDrive.has(f.archivo)) };
+  }
+  return { indice: out, restauradas, sinProcesar, huerfanas };
 }

@@ -105,6 +105,9 @@ export function afinarDatosFactura(datos, opciones = {}){
   const propio = String(opciones.rncPropio || '').replace(/\D/g, '');
   const rnc = String(d.rncEmisor || '').replace(/\D/g, '');
   if (propio && rnc && rnc === propio) d.rncEmisor = null;
+  // El NCF se guarda SIEMPRE en su forma oficial (sin espacios ni separadores): asi el
+  // control de duplicados compara peras con peras y el TXT del 606 sale correcto.
+  if (d.ncf) d.ncf = ncfCanonico(d.ncf) || null;
   // Propina legal (Ley 16-92): solo la traen restaurantes y servicios de comida. Si no
   // viene impresa, es 0 — no "desconocida" (decision de Ari): el 606 la necesita numerica.
   d.propinaLegal = montoValido(d.propinaLegal) ? d.propinaLegal : 0;
@@ -150,8 +153,17 @@ export function estadoFactura(datos, origen, opciones = {}){
   return 'completa'; // gemini o manual con esenciales
 }
 
+// NCF en forma canonica para comparar: sin espacios, guiones, puntos ni ningun otro
+// separador, y en mayusculas. Fase 22 — el OCR y la IA devuelven el mismo comprobante de
+// formas distintas ("B01 0000 7133", "b0100007133", "NCF: B0100007133", "e310000025067"),
+// y comparandolos crudos la MISMA factura no se detectaba como duplicada.
+export function ncfCanonico(ncf){
+  return String(ncf == null ? '' : ncf).toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
 export function buscarDuplicado(indice, ncf){
-  if (!indice || !Array.isArray(indice.facturas) || !ncf) return null;
-  const objetivo = String(ncf).trim().toLowerCase();
-  return indice.facturas.find(f => f.ncf && String(f.ncf).trim().toLowerCase() === objetivo) || null;
+  if (!indice || !Array.isArray(indice.facturas)) return null;
+  const objetivo = ncfCanonico(ncf);
+  if (!objetivo) return null;
+  return indice.facturas.find(f => ncfCanonico(f.ncf) === objetivo) || null;
 }
