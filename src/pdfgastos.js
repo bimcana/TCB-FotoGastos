@@ -21,51 +21,80 @@ export const MAX_COLUMNAS = 3;
 // normales llegan a 3.80 y los de supermercado empiezan en 4.35 → corte en 4.
 export const RATIO_LARGA = 4;
 
-// REPARTO DE ANCHO (Ari, 2026-08-11): una factura de formato carta (8.5x11 → ratio 1.29)
-// escalada a una casilla de 198x396 solo alcanza ~256 pt de alto: se ve diminuta al lado
-// de un ticket, que si llena los 396. La causa es que la casilla es fija y estrecha.
-// SOLUCION: el ancho ya no es fijo — cada factura recibe el ancho que necesita para
-// llegar a una MISMA altura, y esa altura es la mayor que permita la banda. Asi una carta
-// toma ~306 pt de ancho y llega a los 396 de alto, igual que los tickets.
-// Una pagina se cierra cuando meter la siguiente encogeria a todas por debajo de
-// ALTURA_MIN — de ahi salen solas las reglas que pidio Ari: dos cartas ocupan una pagina
-// entera, y una carta con un ticket largo tambien.
-export const ALTURA_MIN = 340;   // ~86% de la altura de banda; por debajo se ve pequeño
+// TAMAÑO SEGUN EL PAPEL REAL (Ari, 2026-08-11, 2a pasada).
+// 1er intento: igualar la ALTURA de todas. Error — un voucher de gasolina (papel de 2.5-3"
+// y pocas lineas) se estiraba hasta parecer tan grande como una hoja carta, "compitiendo
+// visualmente con las otras dos que fisicamente son mas grandes".
+// AHORA: se estima el tamaño FISICO del papel y todas las facturas de una pagina se
+// escalan con el MISMO factor (pt por pulgada). Asi el PDF respeta las proporciones
+// reales: la carta se ve grande, el ticket de supermercado alto, y el voucher de
+// gasolina pequeño — que es como estan sobre la mesa.
+// El ancho fisico se deduce del ratio, calibrado con 93 facturas reales: hasta 1.9 son
+// hojas (carta/A4, 8.5"), por encima son rollos de caja (~3").
+export const RATIO_CARTA = 1.9;
+export const ANCHO_CARTA = 8.5;   // pulgadas
+export const ANCHO_ROLLO = 3;
+// Por debajo de este factor todo se ve pequeño → la factura pasa a la pagina siguiente.
+// Calibrado para que 2 cartas quepan juntas (factor 36) y 3 no (23) — la regla de Ari.
+export const FACTOR_MIN = 30;
+// Las facturas de rollo pueden ensancharse hasta un 10% cuando sobra sitio: ayuda a leer
+// el texto sin deformarlas de forma perceptible (autorizado por Ari).
+export const ESTIRADO_MAX = 1.10;
 
-// Columnas que ocupa una factura, con el ratio de CADA columna. El ticket largo se parte
-// en 2 mitades verticales, asi que cada mitad tiene la mitad de esbeltez.
-export function columnasDe(ratio){
-  return ratio > RATIO_LARGA ? [ratio / 2, ratio / 2] : [ratio];
+export function anchoFisico(ratio){
+  return ratio < RATIO_CARTA ? ANCHO_CARTA : ANCHO_ROLLO;
 }
 
-// Altura comun maxima para un conjunto de columnas: la mayor h tal que la suma de anchos
-// (h/ratio de cada una) mas los huecos quepa en la banda. Puro.
-export function alturaComun(ratiosCol, alturaMax = CAJA.h, anchoUtil = ANCHO_UTIL, hueco = HUECO){
-  const n = ratiosCol.length;
+// Columnas que ocupa una factura, con su tamaño FISICO en pulgadas. El ticket de
+// supermercado se parte en 2 mitades, asi que cada una mide la mitad de alto.
+export function columnasDe(ratio){
+  const w = anchoFisico(ratio);
+  const h = w * ratio;
+  return ratio > RATIO_LARGA ? [{ w, h: h / 2, ratio }, { w, h: h / 2, ratio }] : [{ w, h, ratio }];
+}
+
+// Puntos por pulgada con los que se dibuja una pagina: el mayor que hace que todo quepa
+// a lo ancho de la banda y que la mas alta no rebase la altura de casilla. Puro.
+export function factorEscala(cols, alturaMax = CAJA.h, anchoUtil = ANCHO_UTIL, hueco = HUECO){
+  const n = cols.length;
   if (!n) return 0;
   const disponible = anchoUtil - (n - 1) * hueco;
   if (disponible <= 0) return 0;
-  const suma = ratiosCol.reduce((s, r) => s + 1 / r, 0);
-  return Math.min(alturaMax, disponible / suma);
+  const sumaAncho = cols.reduce((s, c) => s + c.w, 0);
+  const maxAlto = Math.max(...cols.map(c => c.h));
+  return Math.min(disponible / sumaAncho, alturaMax / maxAlto);
 }
 
-// Reparte una pagina ya cerrada: calcula la altura comun, el ancho de cada columna y las
-// posiciones x (el grupo queda centrado en la banda).
+// Reparte una pagina ya cerrada: escala con el factor comun, estira los rollos si sobra
+// sitio y separa las cajas de forma uniforme (el grupo queda centrado en la banda).
 function disponer(arr){
-  const ratiosCol = arr.flatMap(it => columnasDe(it.ratio));
-  const h = alturaComun(ratiosCol);
-  const anchos = ratiosCol.map(r => h / r);
-  const total = anchos.reduce((s, w) => s + w, 0) + (ratiosCol.length - 1) * HUECO;
-  let x = X_INI + (ANCHO_UTIL - total) / 2;
+  const cols = arr.flatMap(it => columnasDe(it.ratio));
+  const n = cols.length;
+  const factor = factorEscala(cols);
+  const anchos = cols.map(c => c.w * factor);
+  const altos = cols.map(c => c.h * factor);
+  // Estirado: solo los rollos, y solo con el ancho que de verdad sobra.
+  const usado = anchos.reduce((s, w) => s + w, 0);
+  const anchoRollos = cols.reduce((s, c, i) => s + (c.ratio >= RATIO_CARTA ? anchos[i] : 0), 0);
+  const sobra = (ANCHO_UTIL - (n - 1) * HUECO) - usado;
+  const estirado = (sobra > 0 && anchoRollos > 0)
+    ? Math.min(ESTIRADO_MAX, 1 + sobra / anchoRollos) : 1;
+  cols.forEach((c, i) => { if (c.ratio >= RATIO_CARTA) anchos[i] *= estirado; });
+  // Separacion uniforme entre HUECO y el doble, con el conjunto centrado.
+  const usadoFinal = anchos.reduce((s, w) => s + w, 0);
+  const sep = n > 1
+    ? Math.min(HUECO * 2, Math.max(HUECO, (ANCHO_UTIL - usadoFinal) / (n + 1)))
+    : 0;
+  let x = X_INI + (ANCHO_UTIL - (usadoFinal + sep * (n - 1))) / 2;
   let k = 0;
   return arr.map(it => {
     const cajas = columnasDe(it.ratio).map(() => {
-      const caja = { x, w: anchos[k], h };
-      x += anchos[k] + HUECO;
+      const caja = { x, w: anchos[k], h: altos[k] };
+      x += anchos[k] + sep;
       k++;
       return caja;
     });
-    return { ...it, celdas: cajas.length, cajas, alturaCaja: h };
+    return { ...it, celdas: cajas.length, cajas, alturaCaja: cajas[0].h, factor };
   });
 }
 
@@ -75,8 +104,8 @@ export function paginar(items){
   const cierra = () => { if (actual.length){ paginas.push(disponer(actual)); actual = []; } };
   for (const it of items || []){
     const cols = [...actual, it].flatMap(x => columnasDe(x.ratio));
-    // Cabe si no pasa de 3 columnas Y si al repartir todas siguen viendose grandes.
-    if (actual.length && (cols.length > MAX_COLUMNAS || alturaComun(cols) < ALTURA_MIN)) cierra();
+    // Cabe si no pasa de 3 columnas Y si al escalar todo sigue viendose a buen tamaño.
+    if (actual.length && (cols.length > MAX_COLUMNAS || factorEscala(cols) < FACTOR_MIN)) cierra();
     actual.push(it);
   }
   cierra();
