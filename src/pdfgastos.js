@@ -34,15 +34,32 @@ export const RATIO_LARGA = 4;
 export const RATIO_CARTA = 1.9;
 export const ANCHO_CARTA = 8.5;   // pulgadas
 export const ANCHO_ROLLO = 3;
-// Por debajo de este factor todo se ve pequeño → la factura pasa a la pagina siguiente.
-// Calibrado para que 2 cartas quepan juntas (factor 36) y 3 no (23) — la regla de Ari.
-export const FACTOR_MIN = 30;
+// REGLA DE LLENADO (Ari, 2026-08-11, tras ver el PDF real): **SIEMPRE 3 facturas por
+// pagina**, con solo dos excepciones — un ticket de supermercado (ocupa 2 columnas) y
+// dos hojas carta juntas (llenan la pagina entre las dos).
+// Antes habia un umbral `FACTOR_MIN` que cerraba la pagina si al repartir todo quedaba
+// pequeño. Fue un error: dejaba facturas SOLAS en su pagina (medido con las 36 de Junio
+// 2025: 6 paginas de una sola factura). El tamaño lo resuelve `factorEscala`; cuantas
+// caben es una decision de maquetacion, no de escala.
 // Las facturas de rollo pueden ensancharse hasta un 10% cuando sobra sitio: ayuda a leer
 // el texto sin deformarlas de forma perceptible (autorizado por Ari).
 export const ESTIRADO_MAX = 1.10;
 
+export function esCarta(ratio){ return ratio < RATIO_CARTA; }
+
 export function anchoFisico(ratio){
-  return ratio < RATIO_CARTA ? ANCHO_CARTA : ANCHO_ROLLO;
+  return esCarta(ratio) ? ANCHO_CARTA : ANCHO_ROLLO;
+}
+
+// ¿Cabe `nuevo` en la pagina que ya tiene `actual`? Puro y testeado: es LA regla de
+// maquetacion, separada del calculo de tamaños.
+export function cabeEnPagina(actual, nuevo){
+  const items = [...actual, nuevo];
+  const columnas = items.reduce((s, x) => s + columnasDe(x.ratio).length, 0);
+  if (columnas > MAX_COLUMNAS) return false;          // el supermercado se lleva 2
+  // Dos hojas carta ya llenan la pagina: no entra una tercera factura.
+  if (items.filter(x => esCarta(x.ratio)).length >= 2 && items.length > 2) return false;
+  return true;
 }
 
 // Columnas que ocupa una factura, con su tamaño FISICO en pulgadas. El ticket de
@@ -103,9 +120,7 @@ export function paginar(items){
   let actual = [];
   const cierra = () => { if (actual.length){ paginas.push(disponer(actual)); actual = []; } };
   for (const it of items || []){
-    const cols = [...actual, it].flatMap(x => columnasDe(x.ratio));
-    // Cabe si no pasa de 3 columnas Y si al escalar todo sigue viendose a buen tamaño.
-    if (actual.length && (cols.length > MAX_COLUMNAS || factorEscala(cols) < FACTOR_MIN)) cierra();
+    if (actual.length && !cabeEnPagina(actual, it)) cierra();
     actual.push(it);
   }
   cierra();
