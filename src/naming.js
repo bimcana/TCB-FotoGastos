@@ -21,6 +21,32 @@ export function hoyISO(d = new Date()){
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
+// --- Orden de presentacion (Fase 21) ---------------------------------------
+// El indice `_gastos.json` guarda las facturas en el orden en que se SUBIERON, que no
+// tiene por que ser el de sus fechas (una factura vieja puede fotografiarse despues).
+// Los documentos del cierre —PDF, Excel de revision y TXT— deben ir SIEMPRE en orden
+// ascendente de fecha de emision, que es justo para lo que existe el nombre `Compra_DDN`:
+// DD = dia de emision, N = correlativo de ese dia.
+
+// Correlativo N de un nombre `Compra_DDN.jpg`; lo que no lo sea va al final del dia.
+export function correlativoDe(archivo){
+  const m = String(archivo || '').match(/^Compra_(\d{2})(\d+)\.jpe?g$/i);
+  return m ? parseInt(m[2], 10) : Number.MAX_SAFE_INTEGER;
+}
+
+// Facturas ordenadas por fecha de emision y, dentro del mismo dia, por su correlativo.
+// Las que no tienen fecha (provisionales) quedan al final. No muta la lista original.
+export function ordenarParaDocumento(facturas){
+  const clave = f => f && f.fechaEmision ? String(f.fechaEmision) : '9999-99-99';
+  return [...(facturas || [])].sort((a, b) => {
+    const fa = clave(a), fb = clave(b);
+    if (fa !== fb) return fa < fb ? -1 : 1;
+    const ca = correlativoDe(a && a.archivo), cb = correlativoDe(b && b.archivo);
+    if (ca !== cb) return ca - cb;
+    return String(a && a.archivo || '').localeCompare(String(b && b.archivo || ''));
+  });
+}
+
 // --- Fase 2D: nombres provisionales y re-archivado -------------------------
 // Una factura guardada sin fecha de emision conocida sube como Pendiente_… y
 // se renombra/mueve cuando la IA (o el usuario) fija la fecha real.
