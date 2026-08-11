@@ -65,6 +65,16 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   defecto (Fase 9) TODA captura caía como «Pendiente de revisión» pese a haberla
   revisado el humano. `pendiente` queda solo para lo que nadie validó: provisionales
   (sin fecha) y lo que rellena «Leer con IA». Confirmar NO tapa un esencial vacío.
+- **SINCRONÍA CON DRIVE (Fase 22)**: `conciliarIndice` va en LAS DOS DIRECCIONES —
+  restaura del `description` lo que el índice hubiera perdido **y QUITA las entradas cuya
+  imagen ya no está en Drive** (`huerfanas`). Antes solo añadía: si se borraba una factura
+  a mano desde Drive, la entrada quedaba clavada en `_gastos.json`, Gastos la mostraba sin
+  miniatura, no dejaba borrarla y **el cierre del mes fallaba** al no encontrar la imagen.
+  `renderSeccion` persiste ambas cosas bajo el mutex y avisa con un toast.
+  **DOS SALVAGUARDAS, no tocar:** (1) con lista de archivos VACÍA no se quita nada (un
+  fallo de red no puede vaciar un registro fiscal); (2) `listarArchivos` **pagina de
+  verdad** (`nextPageToken`) — antes cortaba en 1000 en silencio, y una lista truncada
+  habría borrado entradas válidas como si fueran huérfanas.
 - **`description` del archivo en Drive** = la MISMA entrada como JSON con `v:1` — es la
   fuente de verdad que viaja con el archivo. **TODA escritura de metadatos debe actualizarla**
   (subida, `actualizarEntradaConReArchivo`, re-archivado). `conciliarIndice` restaura al
@@ -144,6 +154,15 @@ Vendor (~40 MB, NO precacheados los grandes): `opencv.js`, `ort/` + `modelos/u2n
   borde del papel, así que la geometría del papel da el mismo resultado y es fiable.
 - **Ajena ("Sin procesar")**: `procesarAjena` → mismo pipeline → al confirmar, original a
   papelera (`__origenAjeno`, se limpia en shutter/lote/cancelar — no quitar esa limpieza).
+- **NCF CANÓNICO (Fase 22)**: el OCR y la IA devuelven el mismo comprobante de formas
+  distintas (`B01 0000 7133`, `b0100007133`, `B01-0000-7133`) y comparándolos crudos **la
+  misma factura no se detectaba como duplicada**. `ncfCanonico` (validacion.js, pura)
+  deja solo alfanuméricos en mayúsculas; lo usan `buscarDuplicado`, `afinarDatosFactura`
+  (al leer, para que se GUARDE ya canónico) y el campo de la tarjeta al salir de él.
+- **Borrado en DOS pasos (Fase 22)**: `eliminarFactura` toca el archivo y limpia el índice
+  por separado. Si el archivo ya no está en Drive (borrado a mano) o falla el permiso, **el
+  registro se limpia igual** — antes la excepción abortaba todo y la entrada se quedaba
+  clavada. No volver a unirlos en un solo `try`.
 - **Duplicado al leer el NCF (Fase 12)**: `actualizarEntradaConReArchivo` llama a
   `marcarSiDuplicada` (usa `repiteNCF`, puro en indice.js) en sus TRES ramas. Antes solo
   se chequeaba al mover de carpeta de mes → una factura de Lite (llega sin NCF y solo se

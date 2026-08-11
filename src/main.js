@@ -38,7 +38,7 @@ import { get, set } from './settings.js';
 import { extraerDatos, diagnosticoGemini, probarApiKey } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
 import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta, normalizarMontoTexto,
-         formatearFechaDO, formatearMonto, rncValido, afinarDatosFactura } from './validacion.js';
+         formatearFechaDO, formatearMonto, rncValido, afinarDatosFactura, ncfCanonico } from './validacion.js';
 import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
 
 // Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
@@ -378,6 +378,8 @@ function normalizarCampoEntrada(id){
   if (/fecha/.test(id)){
     const f = normalizarFecha(v);
     if (f) el.value = formatearFechaDO(f);        // 17072026 → 17-07-2026
+  } else if (/ncf/.test(id)){
+    el.value = ncfCanonico(v);                    // "b01 0000 7133" → "B0100007133"
   } else if (/subtotal|propina|itbis|total/.test(id)){
     const n = normalizarMontoTexto(v);
     if (n != null) el.value = formatearMonto(n);  // 2500 → 2,500.00
@@ -1380,10 +1382,17 @@ function filaFactura(ctx, e, nombre){
 async function eliminarFactura(ctx, e, nombre){
   const etiqueta = e ? (e.duplicada ? 'duplicada' : e.estado) : 'sin procesar';
   if (!confirm(`¿Eliminar «${nombre}» (${etiqueta})? Se quitará de tus Gastos.`)) return;
+  // Fase 22: el borrado se hace en DOS pasos independientes. Antes, si tocar el archivo
+  // en Drive fallaba (tipico: ya lo habian borrado a mano desde Drive), la excepcion
+  // abortaba TODO y la entrada se quedaba clavada en el indice para siempre: Gastos la
+  // seguia mostrando sin miniatura y el cierre del mes fallaba. Ahora el indice se limpia
+  // pase lo que pase con el archivo.
+  let via = 'papelera', fallo = null;
   try {
     const fileId = (e && e.driveId) || ctx.idPorNombre?.get(nombre) || await buscarArchivo(ctx.mesId, nombre);
-    let via = 'papelera';
-    if (fileId){
+    if (!fileId){
+      via = 'ausente';   // ya no esta en Drive (borrada a mano): solo queda limpiar el indice
+    } else {
       try {
         await moverAPapelera(fileId);
       } catch(err){
@@ -1393,28 +1402,38 @@ async function eliminarFactura(ctx, e, nombre){
         else throw err;
       }
     }
+  } catch(err){
+    console.error(err);
+    fallo = err;
+  }
+  // Paso 2: limpiar el registro. Se hace SIEMPRE, aunque el paso 1 haya fallado.
+  try {
     if (e){
       await conLockIndice(async () => {
         const idx = await leerJSON(ctx.mesId, '_gastos.json');
         if (idx) await guardarJSON(ctx.mesId, '_gastos.json', quitarEntrada(idx, nombre));
       });
-      try {
-        const item = (await pendientesRevision()).find(x => x.archivo === nombre);
-        if (item) await eliminarRevision(item.id);
-      } catch(err){ console.error(err); }
     }
-    toast(via === 'papelera'
-      ? `«${nombre}» eliminada — recuperable en la papelera de Drive`
-      : `«${nombre}» eliminada de Gastos ✓`);
-    refrescarGastos();
+    try {
+      const item = (await pendientesRevision()).find(x => x.archivo === nombre);
+      if (item) await eliminarRevision(item.id);
+    } catch(err){ console.error(err); }
   } catch(err){
     console.error(err);
-    // Si ni la papelera ni quitarla de la carpeta funcionan, es que no somos dueños de la
-    // carpeta compartida: mensaje honesto en vez del volcado crudo del 403.
-    toast(esErrorDePermiso(err)
-      ? 'No se pudo eliminar: la subió otra cuenta y no tienes permiso sobre la carpeta. Bórrala desde Google Drive.'
-      : 'No se pudo eliminar: ' + err.message);
+    toast('No se pudo actualizar el registro: ' + err.message);
+    return;
   }
+  refrescarGastos();
+  if (fallo){
+    // El registro ya quedo limpio; se avisa de lo que no se pudo tocar en Drive.
+    toast(esErrorDePermiso(fallo)
+      ? `«${nombre}» quitada de Gastos, pero el archivo lo subió otra cuenta: bórralo desde Google Drive`
+      : `«${nombre}» quitada de Gastos; el archivo en Drive no se pudo tocar`);
+    return;
+  }
+  toast(via === 'papelera' ? `«${nombre}» eliminada — recuperable en la papelera de Drive`
+      : via === 'ausente'  ? `«${nombre}» ya no estaba en Drive — se quitó de Gastos ✓`
+      : `«${nombre}» eliminada de Gastos ✓`);
 }
 
 async function renderSeccion(carpeta, bodyEl, metaEl){
@@ -1423,8 +1442,9 @@ async function renderSeccion(carpeta, bodyEl, metaEl){
     const archivos = await listarArchivos(carpeta.id);
     const idx = carpeta.esMes ? await leerJSON(carpeta.id, '_gastos.json').catch(() => null) : null;
     const conc = conciliarIndice(idx, archivos);
-    // Persistir restauraciones (bajo el mutex, re-leyendo fresco para no pisar a nadie).
-    if (carpeta.esMes && conc.restauradas.length){
+    // Persistir la conciliacion (bajo el mutex, re-leyendo fresco para no pisar a nadie):
+    // restaura lo que el indice hubiera perdido y QUITA lo que ya no existe en Drive.
+    if (carpeta.esMes && (conc.restauradas.length || conc.huerfanas.length)){
       conLockIndice(async () => {
         let vivo = await leerJSON(carpeta.id, '_gastos.json');
         const hay = new Set((vivo?.facturas || []).map(f => f.archivo));
@@ -1432,9 +1452,15 @@ async function renderSeccion(carpeta, bodyEl, metaEl){
         for (const r of conc.restauradas){
           if (!hay.has(r.archivo)){ vivo = agregarEntrada(vivo, r); cambio = true; }
         }
+        for (const h of conc.huerfanas){
+          if (hay.has(h.archivo)){ vivo = quitarEntrada(vivo, h.archivo); cambio = true; }
+        }
         if (cambio) await guardarJSON(carpeta.id, '_gastos.json', vivo);
       }).catch(e => console.error(e));
-      toast(`Se restauraron ${conc.restauradas.length} factura(s) del índice de ${carpeta.name}`);
+      if (conc.restauradas.length)
+        toast(`Se restauraron ${conc.restauradas.length} factura(s) del índice de ${carpeta.name}`);
+      if (conc.huerfanas.length)
+        toast(`${conc.huerfanas.length} factura(s) borrada(s) en Drive: se quitaron de ${carpeta.name}`);
     }
     const ctx = { mesId: carpeta.id, idx: conc.indice, carpetaNombre: carpeta.name, esMes: carpeta.esMes };
     const idPorNombre = new Map(archivos.map(a => [a.name, a.id]));
@@ -1636,17 +1662,29 @@ async function generarDocumento(ctx){
   bar.hidden = false; document.getElementById('lote-dots').innerHTML = '';
   try {
     const items = [];
+    const sinImagen = [];
     for (let i = 0; i < completas.length; i++){
       const f = completas[i];
       txtBar.textContent = `Generando — descargando ${i + 1} de ${completas.length}…`;
-      const blob = thumbCache.get(f.archivo) || await descargarImagen(ctx.mesId, f.archivo);
-      if (!blob){ toast(`No se pudo leer ${f.archivo}; el PDF sale sin ella`); continue; }
+      // Una imagen que falta (borrada a mano en Drive, sin red…) NO puede tumbar el cierre:
+      // se anota, se sigue con las demas y al final se avisa (Fase 22).
+      let blob = thumbCache.get(f.archivo) || null;
+      if (!blob){
+        try { blob = await descargarImagen(ctx.mesId, f.archivo); }
+        catch(err){ console.error(err); blob = null; }
+      }
+      if (!blob){ sinImagen.push(f.archivo); continue; }
       thumbCache.set(f.archivo, blob);
-      const prep = await prepararImagen(blob);
-      items.push({ archivo: f.archivo, total: f.total, ratio: prep.ratio,
-                   partes: await Promise.all(prep.partes.map(async b => new Uint8Array(await b.arrayBuffer()))) });
+      try {
+        const prep = await prepararImagen(blob);
+        items.push({ archivo: f.archivo, total: f.total, ratio: prep.ratio,
+                     partes: await Promise.all(prep.partes.map(async b => new Uint8Array(await b.arrayBuffer()))) });
+      } catch(err){ console.error(err); sinImagen.push(f.archivo); }
     }
-    if (!items.length) throw new Error('no se pudo leer ninguna imagen');
+    if (sinImagen.length){
+      toast(`${sinImagen.length} factura(s) sin imagen en Drive: salen en el 606 pero no en el PDF (${sinImagen[0]}${sinImagen.length > 1 ? '…' : ''})`);
+    }
+    if (!items.length) throw new Error('ninguna de las facturas tiene su imagen en Drive');
     txtBar.textContent = 'Generando — armando el PDF…';
     const pdfBlob = await generarPDF(paginar(items), emp, mesTexto);
     txtBar.textContent = 'Generando — armando el 606…';

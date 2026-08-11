@@ -162,10 +162,21 @@ export async function listarCarpetas(padreId){
 }
 
 // Listado con lo necesario para conciliar: nombre, tipo y description (metadatos propios).
+// Listado COMPLETO (recorre todas las paginas). Es imprescindible que este completo:
+// `conciliarIndice` quita del indice las facturas que no aparezcan aqui, asi que una
+// lista truncada borraria registros fiscales validos. Antes se pedia pageSize=1000 y se
+// ignoraba `nextPageToken` — con mas de 1000 archivos en la carpeta se truncaba en
+// silencio (Fase 22).
 export async function listarArchivos(carpetaId){
   const q = encodeURIComponent(`'${carpetaId}' in parents and mimeType != 'application/vnd.google-apps.folder' and trashed=false`);
-  const res = await api(`files?q=${q}&fields=files(id,name,mimeType,description)&pageSize=1000`);
-  return res.files;
+  let token = null, todos = [];
+  do {
+    const res = await api(`files?q=${q}&fields=nextPageToken,files(id,name,mimeType,description)` +
+                          `&pageSize=1000${token ? '&pageToken=' + encodeURIComponent(token) : ''}`);
+    todos = todos.concat(res.files || []);
+    token = res.nextPageToken || null;
+  } while (token);
+  return todos;
 }
 
 export async function descargarPorId(fileId){

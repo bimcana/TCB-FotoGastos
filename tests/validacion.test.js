@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ncfValido, normalizarFecha, montoValido, buscarDuplicado, facturaCompleta, estadoFactura, normalizarMontoTexto, formatearFechaDO, formatearMonto,
-         rncValido, deducirMontos, afinarDatosFactura } from '../src/validacion.js';
+         rncValido, deducirMontos, afinarDatosFactura, ncfCanonico } from '../src/validacion.js';
 
 test('NCF serie B válido', () => { assert.equal(ncfValido('B0100182291'), true); });
 test('NCF serie E válido', () => { assert.equal(ncfValido('E310000083906'), true); });
@@ -27,6 +27,33 @@ test('montoValido', () => {
   assert.equal(montoValido(-1), false);
   assert.equal(montoValido('x'), false);
 });
+// --- Fase 22: el NCF se compara en forma canonica ---
+// El OCR y la IA devuelven el mismo comprobante de formas distintas y la MISMA factura
+// no se detectaba como duplicada (lo reporto Ari).
+test('ncfCanonico: mismo comprobante escrito de varias formas → misma clave', () => {
+  const esperado = 'B0100007133';
+  for (const v of ['B0100007133', 'b0100007133', 'B01 0000 7133', 'B01-0000-7133',
+                   ' B0100007133 ', 'B01.0000.7133'])
+    assert.equal(ncfCanonico(v), esperado, `fallo con "${v}"`);
+  assert.equal(ncfCanonico('e310000025067'), 'E310000025067');
+  assert.equal(ncfCanonico(null), '');
+  assert.equal(ncfCanonico(''), '');
+});
+
+test('buscarDuplicado detecta el duplicado aunque el NCF venga con espacios o minusculas', () => {
+  const idx = { facturas: [{ archivo: 'Compra_020.jpg', ncf: 'B0100007133' }] };
+  assert.equal(buscarDuplicado(idx, 'b01 0000 7133').archivo, 'Compra_020.jpg');
+  assert.equal(buscarDuplicado(idx, 'B01-0000-7133').archivo, 'Compra_020.jpg');
+  assert.equal(buscarDuplicado(idx, 'B0100007134'), null, 'un NCF distinto no es duplicado');
+});
+
+test('buscarDuplicado: sin NCF no inventa duplicados', () => {
+  const idx = { facturas: [{ archivo: 'a.jpg', ncf: null }, { archivo: 'b.jpg', ncf: '' }] };
+  assert.equal(buscarDuplicado(idx, null), null);
+  assert.equal(buscarDuplicado(idx, ''), null);
+  assert.equal(buscarDuplicado(idx, '   '), null);
+});
+
 test('buscarDuplicado encuentra por NCF', () => {
   const idx = { facturas: [{ archivo:'Compra_100.jpg', ncf:'B0100077145' }] };
   assert.equal(buscarDuplicado(idx, 'B0100077145').archivo, 'Compra_100.jpg');

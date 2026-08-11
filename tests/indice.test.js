@@ -54,6 +54,48 @@ test('entradaDeDesc tolera basura y descripciones ajenas', () => {
   assert.equal(entradaDeDesc(null), null);
 });
 
+// --- Fase 22: facturas borradas a mano en Drive (el bug que reporto Ari) ---
+// Antes la entrada se quedaba clavada en _gastos.json: Gastos la mostraba sin miniatura,
+// no dejaba borrarla y el cierre del mes fallaba al no encontrar la imagen.
+
+const jpg = n => ({ name: n, mimeType: 'image/jpeg', description: '' });
+
+test('conciliarIndice quita del indice la factura borrada en Drive', () => {
+  const idx = { facturas: [
+    { archivo: 'Compra_020.jpg', ncf: 'B01' },
+    { archivo: 'Compra_110.jpg', ncf: 'B02' }   // esta se borro a mano en Drive
+  ]};
+  const r = conciliarIndice(idx, [jpg('Compra_020.jpg')]);
+  assert.equal(r.huerfanas.length, 1);
+  assert.equal(r.huerfanas[0].archivo, 'Compra_110.jpg');
+  assert.deepEqual(r.indice.facturas.map(f => f.archivo), ['Compra_020.jpg']);
+});
+
+test('conciliarIndice: SALVAGUARDA — con lista vacia no se toca el indice', () => {
+  // Un fallo de red o una respuesta incompleta no puede vaciar un registro fiscal
+  const idx = { facturas: [{ archivo: 'Compra_020.jpg' }, { archivo: 'Compra_110.jpg' }] };
+  const r = conciliarIndice(idx, []);
+  assert.equal(r.huerfanas.length, 0);
+  assert.equal(r.indice.facturas.length, 2);
+});
+
+test('conciliarIndice: restaurar y quitar conviven en la misma pasada', () => {
+  const idx = { facturas: [{ archivo: 'Compra_010.jpg', ncf: 'B01' }] };  // su imagen ya no esta
+  const archivos = [{ name: 'Compra_050.jpg', mimeType: 'image/jpeg',
+                      description: JSON.stringify({ v: 1, archivo: 'Compra_050.jpg', ncf: 'B09' }) }];
+  const r = conciliarIndice(idx, archivos);
+  assert.equal(r.huerfanas.length, 1, 'la del archivo perdido sale');
+  assert.equal(r.restauradas.length, 1, 'la del archivo huerfano entra');
+  assert.deepEqual(r.indice.facturas.map(f => f.archivo), ['Compra_050.jpg']);
+});
+
+test('conciliarIndice: una imagen que sigue en Drive nunca se considera huerfana', () => {
+  const idx = { facturas: [{ archivo: 'Compra_020.jpg' }] };
+  const r = conciliarIndice(idx, [jpg('Compra_020.jpg'), jpg('Compra_110.jpg')]);
+  assert.equal(r.huerfanas.length, 0);
+  assert.equal(r.sinProcesar.length, 1, 'la que no esta en el indice es "sin procesar"');
+});
+
 test('conciliarIndice restaura entradas perdidas desde description', () => {
   const idx = { facturas: [{ archivo: 'Compra_010.jpg', ncf: 'B01A', estado: 'completa' }] };
   const archivos = [
