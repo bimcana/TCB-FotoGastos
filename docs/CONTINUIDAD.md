@@ -16,8 +16,8 @@ archivarlas en Google Drive y generar el cierre mensual.
 |---|---|
 | **App Full** | https://bimcana.github.io/TCB-FotoGastos/ · repo `bimcana/TCB-FotoGastos` |
 | **App Lite** (alimentadora) | https://bimcana.github.io/TCB-Gastos-Lite/ · repo `bimcana/TCB-Gastos-Lite` |
-| **Versión actual** | Full `fase22-v1` · Lite `lite-v10` |
-| **Pruebas** | `npm test` — 212 en la Full, 60 en la Lite. Todo helper puro lleva test. |
+| **Versión actual** | Full `fase23-v1` · Lite `lite-v10` |
+| **Pruebas** | `npm test` — 248 en la Full, 60 en la Lite. Todo helper puro lleva test. |
 | **Publicar** | `git push origin main` **es** publicar (Pages sirve desde `main` en ambos repos). |
 
 **Usuario:** Ari (BIMCANA SRL, Punta Cana). Arquitecto, no programador. Prefiere el
@@ -53,6 +53,13 @@ bloqueadas por Microsoft, control `cmdValidar` roto), así que la app genera el 
 contabilidad (20 facturas de junio 2026). Si algún día la DGII lo rechaza, la comparación
 se hace contra ese VBA — no contra suposiciones. Detalles del formato en
 DOCUMENTO-TECNICO §5d.
+
+### La propina legal sale del monto que se declara (Fase 23)
+`total` es el **total a pagar impreso**, y en un restaurante ya incluye el 10% de ley:
+`total = subtotal + itbis + propina`. `montoFacturado` restaba solo el ITBIS, así que sin
+subtotal impreso se declaraba un **10% de más** en todas las facturas de restaurante.
+Corregido y **re-verificado byte a byte** contra el TXT real — también deduciendo el
+subtotal desde el total, que es el caso que antes fallaba.
 
 > **PENDIENTE DE ARI:** pasar el TXT por el
 > [prevalidador de la DGII](https://dgii.gov.do/herramientas/formularios/Paginas/herramientasPreValidacion.aspx).
@@ -122,6 +129,61 @@ que si el archivo ya no está, el registro se limpia igual. No los vuelvas a uni
 **NCF canónico:** el OCR y la IA escriben el mismo comprobante de formas distintas
 (`B01 0000 7133`, `b0100007133`, `B01-0000-7133`). `ncfCanonico` (solo alfanuméricos en
 mayúsculas) es lo que usa `buscarDuplicado`, y el NCF **se guarda ya canónico** al leer.
+
+---
+
+## 3c. Precisión de la lectura (Fase 23) — por qué salían mal los NCF
+
+Ari reportaba ceros de más o de menos en el NCF, confusiones 0↔6/8/5/9/3 y 8↔3, y su
+propio RNC colándose como RNC del emisor. **Ninguna de las tres era culpa del modelo.**
+
+### La causa raíz: se le mandaba a Gemini una imagen de 323 px de ancho
+`canvasABase64` reducía al **lado LARGO** a 1280 px. Las facturas reales son rollos
+verticales — de las 36 de `Junio 2025/`, **30 tienen proporción >2**:
+
+| Factura | Original | Lo que recibía Gemini |
+|---|---|---|
+| `050.jpg` | 884×3500 | **323**×1280 |
+| `110.jpg` | 985×3500 | **360**×1280 |
+
+Un NCF de 11 caracteres en 323 px son ~10 px por dígito. **Ahí no hay modelo que valga.**
+Ahora `dimensionesLectura` dimensiona por el **lado CORTO** (el ancho del papel), tope de
+5 MP, y **nunca amplía**. Calidad JPEG 0.85 → 0.92.
+
+> **Al tocar el tamaño de la imagen de lectura, piensa en el LADO CORTO.** El lado largo
+> de un rollo no dice nada sobre si el texto se puede leer.
+
+### El largo del NCF es fijo, y ahora se mide
+`B + 2 + 8 = 11` · `E + 2 + 10 = 13`. Verificado contra el TXT real. Antes `ncfValido`
+aceptaba de 8 a 10 dígitos para las dos series y bendecía el error. `ncfDiagnostico` dice
+QUÉ falta o sobra. `corregirNcf` arregla **solo lo deducible con certeza** (letras donde
+obligatoriamente va un dígito) y **jamás agrega ni quita dígitos**: un NCF con el largo
+mal se muestra tal cual para que lo vea un humano.
+
+### El RNC de la empresa nunca puede ser el del emisor
+Regla literal de Ari. Se descarta con `mismoRnc`, que además de la coincidencia exacta
+caza el mismo RNC con **un solo dígito confundible** mal leído. Tres barreras: el prompt,
+`afinarDatosFactura` y la UI (si lo escribes a mano, te lo dice).
+
+### Doble comprobación
+Activada por defecto en Ajustes. La segunda pasada usa **otra imagen** (grises de alto
+contraste) y **otro prompt** (transcribir, no interpretar) — si le mandas la misma imagen
+con el mismo prompt, que coincidan no demuestra nada. `conciliarLecturas` marca lo que
+coincide y **enseña las dos versiones** de lo que no. Cuesta el doble de cuota de Gemini;
+se puede apagar. **Sigue sin dispararse sola** (regla 4 intacta).
+
+### Modelos: solo los que existen
+`gemini-3-flash` estaba en Ajustes y nunca llegó a GA — devolvía 404. La lista ya no se
+escribe a mano en el HTML: sale del catálogo de `gemini.js` y del botón **«Comprobar
+modelos disponibles»**, que pregunta a la API cuáles tiene la key del usuario. Hoy:
+**3.7 Flash** (por defecto), 3.6, 3.5 y 2.5 — todos con la **misma API key**, nivel gratis.
+
+### Lo que NO se hizo, y por qué
+Se evaluó cambiar de motor OCR. Tesseract.js flojea en papel térmico; PaddleOCR y
+dots.ocr son mejores pero piden GPU o modelos de cientos de MB; Cloud Vision es otro
+producto con otra facturación y otra key. **Gemini vision ya era el mejor motor
+disponible aquí** (~94-95% en facturas): el problema era la imagen que se le daba y que
+nadie contrastaba el resultado. Tesseract se queda como respaldo sin conexión.
 
 ## 4. Reglas que no se pueden romper
 

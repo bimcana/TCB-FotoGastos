@@ -1,6 +1,16 @@
+// Fase 23: se pide 2560x1440 en vez de 1920x1080. Cada pixel de mas es un pixel mas por
+// digito del NCF, que es donde se cometian los errores de 0/6/8. `ideal` es una peticion
+// blanda: el navegador da lo mas cercano que tenga, asi que un movil que no llegue sigue
+// funcionando igual.
+//
+// NO se pide 4K a proposito. La foto pasa entera por OpenCV.js (warp + realce), que corre
+// sobre un heap WASM limitado: a 4K cada Mat son ~33 MB y autoColor usa una decena. Eso no
+// se puede probar desde aqui (la camara es justo lo que no se puede probar sin el iPhone),
+// y quedarse sin memoria en pleno cierre de mes seria peor que un digito borroso. El tope
+// de `dimensionesDestino` es la segunda red de seguridad.
 export async function iniciarCamara(video){
   const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+    video: { facingMode: 'environment', width: { ideal: 2560 }, height: { ideal: 1440 } },
     audio: false
   });
   // Enfoque continuo si el dispositivo lo expone (Fase 9): mejor nitidez apuntando

@@ -10,13 +10,23 @@ export function esEstable(prev, curr, tolPx = 8){
   return prev.every((p, i) => Math.hypot(p.x - curr[i].x, p.y - curr[i].y) <= tolPx);
 }
 
+// Tope de la ortofoto (Fase 23). El warp y el realce corren en OpenCV.js sobre un heap
+// WASM acotado: autoColor crea una decena de Mats y a 4:3 real cada uno son decenas de MB.
+// 8 MP deja de sobra para leer un NCF (un rollo de 3" a 8 MP son ~1600 px de ancho de
+// papel) y evita que una camara muy grande tumbe la app justo al capturar.
+export const MAX_PIXELES_ORTO = 8e6;
+
 export function dimensionesDestino(esquinas){
   const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const [tl, tr, br, bl] = esquinas;
-  return {
-    w: Math.round((d(tl, tr) + d(bl, br)) / 2),
-    h: Math.round((d(tl, bl) + d(tr, br)) / 2)
-  };
+  let w = Math.round((d(tl, tr) + d(bl, br)) / 2);
+  let h = Math.round((d(tl, bl) + d(tr, br)) / 2);
+  if (w > 0 && h > 0 && w * h > MAX_PIXELES_ORTO){
+    const k = Math.sqrt(MAX_PIXELES_ORTO / (w * h));
+    w = Math.max(1, Math.round(w * k));
+    h = Math.max(1, Math.round(h * k));
+  }
+  return { w, h };
 }
 
 export function areaCuadrilatero(e){

@@ -34,9 +34,9 @@ y el Excel Formato 606. Multi-usuario sobre una carpeta compartida. La versión 
 | `detectia.js` | U²-Net-p con ONNX Runtime WASM (carga perezosa) | no |
 | `esquinas.js` | editor de esquinas a pantalla completa con lupa; handles laterales (`puntosMedios`/`desplazarLado` puros) | helpers sí |
 | `process.js`/`enhance.js` | ortofoto (warp) + auto-color/filtros | parcial |
-| `gemini.js` | extracción con Gemini (+`diagnosticoGemini`, `probarApiKey`) | parseo sí |
+| `gemini.js` | extracción con Gemini: `extraerDatos`, **`verificarDatos`** (2ª pasada), **`MODELOS`/`listarModelos`** (catálogo real), **`dimensionesLectura`** (tamaño de la imagen de lectura), `diagnosticoGemini`, `probarApiKey` | parseo, `dimensionesLectura` y `filtrarModelosUtiles` sí |
 | `ocrlocal.js` | Tesseract + `parsearTextoFactura(texto, {rncPropio})` | parser sí |
-| `validacion.js` | NCF/fechas/montos: `normalizarFecha`, `normalizarMontoTexto`, `facturaCompleta`, `estadoFactura`, `buscarDuplicado`, `rncValido` (dígito verificador DGII), `deducirMontos`, `afinarDatosFactura` | sí |
+| `validacion.js` | NCF/fechas/montos: `normalizarFecha`, `normalizarMontoTexto`, `facturaCompleta`, `estadoFactura`, `buscarDuplicado`, `rncValido` (dígito verificador DGII), `deducirMontos`, `afinarDatosFactura`; **Fase 23**: `ncfValido` con largo exacto, `ncfDiagnostico`, `ncfTipoConocido`, `corregirNcf`, `mismoRnc`, `coherenciaMontos`, `conciliarLecturas` | sí |
 | `naming.js` | `Compra_DDN`, provisionales, `necesitaReArchivo`, `mesesDeCarpetas` | sí |
 | `indice.js` | `_gastos.json` + **`descDeEntrada`/`entradaDeDesc`/`conciliarIndice`** | sí |
 | `drive.js` | API Drive v3: token persistente, picker de carpetas, papelera, description | no |
@@ -372,6 +372,60 @@ Reglas que NO se pueden romper:
 
 Verificado abriendo el resultado con Excel real (COM): abre sin avisos, cabecera y
 encabezados intactos, cédula con su cero inicial y propina en su fila.
+
+## 5e. Precisión de la lectura (Fase 23)
+
+Cinco piezas independientes. Se pueden tocar por separado, pero conviene saber para qué
+está cada una antes de moverla.
+
+### a) La imagen que sale hacia el modelo — `dimensionesLectura(w, h)`
+Dimensiona por el **lado CORTO** (el ancho del papel), tope `MAX_PIXELES = 5e6`, y **no
+amplía nunca**. Antes se reducía por el lado largo a 1280 px y un rollo de 884×3500 se
+enviaba a 323×1280 (~10 px por dígito del NCF). Calidad `CALIDAD_LECTURA = 0.92`.
+`generationConfig.mediaResolution = 'MEDIA_RESOLUTION_HIGH'` explícito, y el **texto va
+antes de la imagen** en `parts` (recomendación oficial para una sola imagen con texto).
+
+> Si alguna vez hay que aligerar la subida, baja `MAX_PIXELES` — **no** `ANCHO_LECTURA`.
+> El ancho del papel es lo que decide si el NCF se puede leer.
+
+### b) Catálogo de modelos — `MODELOS` / `listarModelos(apiKey)`
+`MODELOS` es el orden de preferencia y el respaldo sin conexión; `listarModelos` pregunta
+a `models.list` qué tiene la key del usuario y `filtrarModelosUtiles` descarta lo que no
+sirve para leer una factura (embeddings, TTS, audio, imagen, vídeo y los alias `-latest` /
+`-001`, que solo duplican la lista). Los botones de Ajustes se pintan desde ahí:
+**no volver a escribir ids de modelo en el HTML.** `extrasDeModelo` manda `thinkingLevel`
+solo a la serie 3, y `pedir()` reintenta sin `mediaResolution`/`thinkingLevel` si un modelo
+los rechaza con 400 — así un modelo nuevo nunca deja al usuario sin lectura.
+
+### c) NCF/e-NCF
+`B + 2 + 8 = 11` · `E + 2 + 10 = 13`. `ncfValido` canoniza y mide; `ncfDiagnostico`
+explica qué falta o sobra; `ncfTipoConocido` avisa (no bloquea) si el tipo no está en la
+lista de la DGII. **`corregirNcf` nunca cambia el número de dígitos** — solo traduce
+letras que están en posiciones obligatoriamente numéricas y el 8/3 que el OCR pone donde
+va la serie. Si le sobra un dígito, se muestra tal cual: esconderlo dejaría al usuario sin
+saber qué corregir.
+
+### d) Doble comprobación — `conciliarLecturas(a, b)`
+Pura, sin DOM ni red. Devuelve `{ datos, conflictos, confirmados }`. Al discrepar gana el
+valor que **pasa la validación estructural** (NCF con su largo, RNC con dígito
+verificador); si empatan, manda `a` y el campo queda en `conflictos`. La UI enseña las dos
+versiones.
+
+> **Lo que hace válida la segunda pasada es que sea DISTINTA**: otra imagen (grises de
+> alto contraste, `canvasParaLectura('local')`) y otro prompt (`PROMPT_VERIFICACION`,
+> transcribir carácter a carácter). Si se le manda la misma imagen con el mismo prompt,
+> coincidir deja de significar nada y el chip «verificado x2» se vuelve una mentira.
+
+Cuesta el doble de cuota. Se apaga en Ajustes (`tcb:dobleComprobacion`). **No rompe la
+regla 4**: sigue corriendo solo cuando el usuario pide la lectura con IA.
+
+### e) Coordenadas de captura — `escalaDeteccion`
+El bucle en vivo trabaja SIEMPRE a `LADO_DETECCION = 1920`, aunque la cámara dé más, para
+que `UMBRAL_NITIDEZ` y `TOL_ESTABLE` (calibrados en campo) sigan midiendo lo mismo. Por
+eso **las esquinas del bucle NO están en el espacio de la foto**: usa
+`ultimasEsquinasEnFoto()` antes de recortar. `MAX_PIXELES_ORTO = 8e6` en
+`dimensionesDestino` protege el heap WASM de OpenCV.js.
+
 
 ## 6. Desarrollo y pruebas
 

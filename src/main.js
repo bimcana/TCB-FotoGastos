@@ -35,10 +35,12 @@ window.toast = toast;
 import { iniciarCamara, capturarFrame } from './camera.js';
 import { procesar, aplicarRealce, canvasAJpeg } from './process.js';
 import { get, set } from './settings.js';
-import { extraerDatos, diagnosticoGemini, probarApiKey } from './gemini.js';
+import { extraerDatos, verificarDatos, diagnosticoGemini, probarApiKey, listarModelos,
+         MODELOS, MODELO_DEFECTO, etiquetaModelo } from './gemini.js';
 import { extraerDatosLocal } from './ocrlocal.js';
 import { ncfValido, normalizarFecha, buscarDuplicado, montoValido, facturaCompleta, normalizarMontoTexto,
-         formatearFechaDO, formatearMonto, rncValido, afinarDatosFactura, ncfCanonico } from './validacion.js';
+         formatearFechaDO, formatearMonto, rncValido, afinarDatosFactura, ncfCanonico,
+         ncfDiagnostico, mismoRnc, coherenciaMontos, conciliarLecturas } from './validacion.js';
 import { encolarRevision, pendientesRevision, eliminarRevision, cuentaRevision } from './revision.js';
 
 // Muestra el overlay "Procesando…" antes de ejecutar trabajo síncrono pesado (OpenCV.js
@@ -59,13 +61,23 @@ function conOverlay(fn){
 let modo = get('modoImagen', 'color');
 const intensidad = 65;
 
-// Modelo de Gemini elegido en Ajustes (por defecto 3.5 Flash).
-let geminiModelo = get('geminiModelo', 'gemini-3.5-flash');
-const ETIQUETA_MODELO = {
-  'gemini-3.5-flash': 'Gemini 3.5 Flash',
-  'gemini-3-flash': 'Gemini 3 Flash',
-  'gemini-2.5-flash': 'Gemini 2.5 Flash'
-};
+// Modelo de Gemini elegido en Ajustes. Por defecto, el mas nuevo del catalogo.
+// MIGRACION (Fase 23): quien tuviera guardado «gemini-3-flash» — un id que nunca llego a
+// GA y devolvia 404 — pasa al modelo por defecto en silencio. Cualquier otro id que ya no
+// exista lo detecta «Comprobar modelos disponibles» en Ajustes.
+const MODELOS_RETIRADOS = ['gemini-3-flash'];
+let geminiModelo = get('geminiModelo', MODELO_DEFECTO);
+if (MODELOS_RETIRADOS.includes(geminiModelo)){
+  geminiModelo = MODELO_DEFECTO;
+  set('geminiModelo', geminiModelo);
+}
+// Modelos que la key del usuario dice tener de verdad (los descubre `listarModelos`).
+// Vacio = todavia no se ha consultado; entonces manda el catalogo.
+let modelosDisponibles = get('geminiModelosVistos', []);
+
+// Doble comprobacion: la lectura con IA se hace DOS veces y se concilian (ver Ajustes).
+// Solo afecta a las lecturas que el usuario pide — la IA sigue sin dispararse sola.
+let dobleComprobacion = get('dobleComprobacion', true);
 
 const video = document.getElementById('cam-video');
 const statusTxt = document.getElementById('cam-status-txt');
@@ -135,7 +147,7 @@ document.getElementById('shutter').addEventListener('click', async () => {
   fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
   // Sin deteccion en vivo: reintenta sobre el still (con rescate), luego el rectangulo
   // minimo (Fase 10: una factura ES un rectangulo) y por ultimo la IA local.
-  let esquinas = ultimasEsquinas
+  let esquinas = ultimasEsquinasEnFoto()
     || detectarDocumento(canvas, 1200)
     || await conOverlay(() => rectanguloDePapel(canvas, 1200))
     || await detectarConIAConOverlay(canvas);
@@ -186,11 +198,59 @@ const CAMPOS_IDS = ['c-fecha', 'c-ncf', 'c-rnc', 'c-comercio', 'c-subtotal', 'c-
 // (p. ej. ajusta esquinas) mientras una lectura previa sigue en vuelo.
 let genOCR = 0;
 
+// Resultado de la doble comprobacion de la lectura en curso (Fase 23).
+let lecturaConflictos = [];
+let lecturaConfirmados = [];
+
+const ROTULO_CAMPO = {
+  fechaEmision: 'Fecha', ncf: 'NCF', rncEmisor: 'RNC', nombreComercio: 'Comercio',
+  subtotal: 'Subtotal', itbis: 'ITBIS', total: 'Total', propinaLegal: 'Propina'
+};
+
+function textoValor(campo, v){
+  if (v == null || v === '') return '—';
+  if (campo === 'fechaEmision') return formatearFechaDO(normalizarFecha(v) || v);
+  if (typeof v === 'number') return formatearMonto(v);
+  return String(v);
+}
+
+function escapar(s){
+  return String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]));
+}
+
+/**
+ * Pinta los avisos de una lectura: primero los desacuerdos de la doble comprobacion
+ * (con las DOS versiones a la vista, para que el humano elija mirando la factura) y
+ * despues lo que la aritmetica no cuadra. Puro DOM: recibe ya lo que hay que decir.
+ */
+function pintarAvisos(contenedor, conflictos, avisosMontos, extra = []){
+  const filas = [];
+  for (const c of conflictos || []){
+    if (c.texto){ filas.push(`<div class="aviso conflicto">${escapar(c.texto)}</div>`); continue; }
+    const rot = ROTULO_CAMPO[c.campo] || c.campo;
+    const elegido = c.elegido === 'b' ? c.b : c.a;
+    const otro = c.elegido === 'b' ? c.a : c.b;
+    filas.push(`<div class="aviso conflicto"><span class="aviso-campo">${escapar(rot)}</span>` +
+      `<span>Las dos lecturas no coinciden: se puso <b>${escapar(textoValor(c.campo, elegido))}</b>, ` +
+      `la otra leyó <b>${escapar(textoValor(c.campo, otro))}</b>. Mira la factura y confirma.</span></div>`);
+  }
+  for (const a of avisosMontos || []){
+    filas.push(`<div class="aviso"><span class="aviso-campo">${escapar(ROTULO_CAMPO[a.campo] || a.campo)}</span>` +
+      `<span>${escapar(a.texto)}</span></div>`);
+  }
+  for (const t of extra || []) filas.push(`<div class="aviso">${escapar(t)}</div>`);
+  contenedor.innerHTML = filas.join('');
+  contenedor.hidden = filas.length === 0;
+}
+
 function vaciarCampos(){
   CAMPOS_IDS.forEach(id => { document.getElementById(id).value = ''; });
   const banner = document.getElementById('dup-banner');
   banner.hidden = true; banner.textContent = '';
   document.getElementById('valid-row').innerHTML = '';
+  const avisos = document.getElementById('avisos-lectura');
+  avisos.innerHTML = ''; avisos.hidden = true;
+  lecturaConflictos = []; lecturaConfirmados = [];
 }
 
 function normalizarEnCampos(datos){
@@ -296,10 +356,11 @@ async function leerDatosDeFactura(){
   }
   const usarIA = !!key && motorPreferido === 'ia';
   origen.hidden = false;
-  origen.textContent = usarIA ? `Leyendo con ${ETIQUETA_MODELO[geminiModelo] || geminiModelo}…` : 'Leyendo (OCR local)…';
+  origen.textContent = usarIA ? `Leyendo con ${etiquetaModelo(geminiModelo)}…` : 'Leyendo (OCR local)…';
   setCamposHabilitados(false);
   const rncPropio = empresaGuardada().rnc;
   let datos = null, motor = 'manual';
+  lecturaConflictos = []; lecturaConfirmados = [];
   try {
     if (usarIA){
       abortLectura = new AbortController();
@@ -307,6 +368,29 @@ async function leerDatosDeFactura(){
         datos = await extraerDatos(canvasParaLectura('gemini'), key, geminiModelo,
           abortLectura.signal, { rncCliente: rncPropio });
         motor = 'gemini';
+        // --- Doble comprobacion (Fase 23) ---------------------------------
+        // La segunda pasada NO es repetir la primera: va sobre otra imagen (el mismo
+        // documento en grises de alto contraste) y con otro encargo (transcribir lo
+        // impreso, no entender la factura). Dos caminos distintos hacia el mismo dato
+        // es lo unico que hace que coincidir signifique algo.
+        if (dobleComprobacion){
+          origen.textContent = 'Comprobando la lectura…';
+          origen.classList.add('leyendo');
+          try {
+            const segunda = await verificarDatos(canvasParaLectura('local'), key, geminiModelo,
+              abortLectura.signal, { rncCliente: rncPropio });
+            const r = conciliarLecturas(datos, segunda);
+            datos = r.datos;
+            lecturaConflictos = r.conflictos;
+            lecturaConfirmados = r.confirmados;
+          } catch(e){
+            if (e.name === 'AbortError') return;
+            // Que falle la comprobacion no puede tumbar una lectura que YA salio bien:
+            // se queda la primera y se dice claramente que no se pudo contrastar.
+            console.error(e);
+            lecturaConflictos = [{ campo: null, texto: 'No se pudo hacer la segunda lectura — estos datos no están contrastados' }];
+          } finally { origen.classList.remove('leyendo'); }
+        }
       }
       catch(e){
         // Cancelada (toggle a OCR, guardado o re-proceso): la nueva accion controla la UI.
@@ -328,7 +412,7 @@ async function leerDatosDeFactura(){
   setCamposHabilitados(true);
   window.__datos = { ...(datos || {}), origen: motor };
   if (datos) normalizarEnCampos(datos);
-  origen.textContent = motor === 'gemini' ? (ETIQUETA_MODELO[geminiModelo] || geminiModelo) : (motor === 'local' ? 'OCR local' : 'sin lectura');
+  origen.textContent = motor === 'gemini' ? etiquetaModelo(geminiModelo) : (motor === 'local' ? 'OCR local' : 'sin lectura');
   nota.hidden = motor !== 'local'; // alerta sutil solo cuando el OCR fue local
   await validarCampos(miGen);
 }
@@ -337,10 +421,33 @@ async function validarCampos(gen){
   const d = leerCampos();
   window.__datos = { ...window.__datos, ...d };
   const chips = [];
-  chips.push(ncfValido(d.ncf) ? okChip('NCF válido') : warnChip('NCF a revisar'));
+  const extra = [];
+  // NCF: el largo oficial es fijo (B=11, E=13) y es justo lo que la IA y el OCR fallan.
+  // El chip dice QUE esta mal, no solo que hay que revisarlo.
+  const diagNcf = ncfDiagnostico(d.ncf);
+  chips.push(diagNcf.ok ? okChip('NCF válido') : warnChip('NCF: ' + (diagNcf.motivo || 'a revisar')));
   chips.push(normalizarFecha(d.fechaEmision) ? okChip('Fecha OK') : warnChip('Fecha a revisar'));
-  // Digito verificador oficial del RNC/cedula: atrapa RNC mal leidos sin red ni IA.
-  chips.push(rncValido(d.rncEmisor) ? okChip('RNC verificado') : warnChip('RNC a revisar'));
+  // REGLA DE ARI: el RNC de MI empresa jamas puede quedar como RNC del emisor. Si el
+  // usuario lo escribe (o lo deja) a mano, se avisa aqui — la ultima barrera antes de que
+  // entre en un registro fiscal.
+  const rncPropioAjustes = empresaGuardada().rnc;
+  const esMiRnc = rncPropioAjustes && d.rncEmisor && mismoRnc(d.rncEmisor, rncPropioAjustes);
+  if (esMiRnc){
+    chips.push(warnChip('Ese RNC es el de TU empresa'));
+    extra.push('El RNC escrito es el de tu propia empresa (' + rncPropioAjustes + '): en el 606 va el del PROVEEDOR que emite la factura.');
+  } else {
+    // Digito verificador oficial del RNC/cedula: atrapa RNC mal leidos sin red ni IA.
+    chips.push(rncValido(d.rncEmisor) ? okChip('RNC verificado') : warnChip('RNC a revisar'));
+  }
+  if (window.__datos?.rncPropioDescartado){
+    extra.push('Se descartó el RNC ' + window.__datos.rncPropioDescartado + ' porque es el de tu empresa: escribe el del comercio que emite.');
+  }
+  // Lo que las dos lecturas leyeron igual: se dice, porque es la unica señal positiva
+  // real que puede dar la herramienta sobre un dato que nadie ha mirado todavia.
+  if (lecturaConfirmados.length){
+    chips.push(okChip(`${lecturaConfirmados.length} campo(s) verificados x2`));
+  }
+  pintarAvisos(document.getElementById('avisos-lectura'), lecturaConflictos, coherenciaMontos(d), extra);
   // Estado de duplicado coherente con el banner: por defecto null; solo se marca al confirmarlo.
   window.__datos.duplicadaDe = null;
   let dupText = '';
@@ -603,15 +710,28 @@ document.getElementById('file-import').addEventListener('change', (ev) => {
 });
 
 const overlay = document.getElementById('cam-overlay');
+// Las esquinas del bucle en vivo viven en el espacio del FRAME DE DETECCION (1920 de lado
+// largo), que desde la Fase 23 ya no coincide con el del video. `escalaDeteccion` guarda
+// la relacion para poder llevarlas al espacio de la FOTO cuando se dispara.
 let ultimasEsquinas = null;
+let escalaDeteccion = 1;
 
-function dibujarOverlay(esquinas){
+/** Las ultimas esquinas detectadas, en coordenadas de la foto a resolucion plena. */
+function ultimasEsquinasEnFoto(){
+  if (!ultimasEsquinas) return null;
+  if (escalaDeteccion === 1) return ultimasEsquinas;
+  return ultimasEsquinas.map(p => ({ x: p.x / escalaDeteccion, y: p.y / escalaDeteccion }));
+}
+
+// `fw`/`fh` son las dimensiones del canvas en cuyo espacio vienen las esquinas (el frame
+// de deteccion, mas pequeño que el video). Por defecto, las del video.
+function dibujarOverlay(esquinas, fw, fh){
   const ctx = overlay.getContext('2d');
   const cw = overlay.clientWidth, ch = overlay.clientHeight;
   if (overlay.width !== cw || overlay.height !== ch){ overlay.width = cw; overlay.height = ch; }
   ctx.clearRect(0, 0, cw, ch);
   if (!esquinas || !video.videoWidth) return;
-  const vw = video.videoWidth, vh = video.videoHeight;
+  const vw = fw || video.videoWidth, vh = fh || video.videoHeight;
   const s = Math.max(cw / vw, ch / vh);
   const ox = (cw - vw * s) / 2, oy = (ch - vh * s) / 2;
   const pts = esquinas.map(p => ({ x: p.x * s + ox, y: p.y * s + oy }));
@@ -635,13 +755,22 @@ const FRAMES_ESTABLES = 4;
 const TOL_ESTABLE = 0.02;
 let estables = 0, disparando = false;
 
+// El bucle de deteccion trabaja SIEMPRE a este lado largo, sea cual sea la resolucion de
+// la camara. Es exactamente el tamaño con el que se calibraron en campo UMBRAL_NITIDEZ y
+// TOL_ESTABLE: si el frame cambiara de tamaño, la nitidez medida cambiaria con el y el
+// disparo automatico dejaria de comportarse igual. La FOTO si se toma a resolucion plena
+// (capturarFrame) — solo se escalan las esquinas al pasar de un espacio al otro.
+const LADO_DETECCION = 1920;
+
 async function buclDeteccion(){
   await cvReady();
   const frame = document.createElement('canvas');
   const tick = () => {
     if (video.videoWidth && document.getElementById('scr-camara').classList.contains('active') && !disparando){
-      frame.width = video.videoWidth; frame.height = video.videoHeight;
-      frame.getContext('2d').drawImage(video, 0, 0);
+      escalaDeteccion = Math.min(1, LADO_DETECCION / Math.max(video.videoWidth, video.videoHeight));
+      frame.width = Math.max(1, Math.round(video.videoWidth * escalaDeteccion));
+      frame.height = Math.max(1, Math.round(video.videoHeight * escalaDeteccion));
+      frame.getContext('2d').drawImage(video, 0, 0, frame.width, frame.height);
       // En vivo: criterio estricto (sin rescate) y sin cuadrilateros pegados al borde,
       // para no marcar "Documento detectado" sobre fondos texturados (falsos positivos).
       // Fase 11 (calibrado con 61 fotos reales — vivo detectaba 2/61): rescate hull
@@ -650,7 +779,7 @@ async function buclDeteccion(){
       // definicion) sino "abarca casi todo el encuadre" (>90% = detecte el fondo).
       let esquinas = detectarDocumento(frame, 700);
       if (esquinas && esCasiElEncuadre(esquinas, frame.width, frame.height)) esquinas = null;
-      dibujarOverlay(esquinas);
+      dibujarOverlay(esquinas, frame.width, frame.height);
       const shutter = document.getElementById('shutter');
 
       if (esquinas && esEstable(ultimasEsquinas, esquinas, frame.width * TOL_ESTABLE)){
@@ -664,7 +793,10 @@ async function buclDeteccion(){
           shutter.classList.remove('arm');
           const fx = document.getElementById('flashfx');
           fx.classList.remove('go'); void fx.offsetWidth; fx.classList.add('go');
-          window.__captura = { canvas: capturarFrame(video), esquinas };
+          // Las esquinas vienen en coordenadas del frame de deteccion; la foto se toma a
+          // resolucion plena, asi que hay que llevarlas a ese otro espacio.
+          ultimasEsquinas = esquinas;
+          window.__captura = { canvas: capturarFrame(video), esquinas: ultimasEsquinasEnFoto() };
           setTimeout(() => { procesarYRevisar(); disparando = false; }, 350);
         }
       } else {
@@ -856,18 +988,82 @@ document.getElementById('btn-probar-gemini').addEventListener('click', async () 
   }
 });
 
-// Selector de modelo de Gemini
+// --- Selector de modelo de Gemini (Fase 23) --------------------------------
+// Peticion de Ari: «no incluir en Ajustes modelos que no existen en realidad». Los
+// botones ya no estan escritos en el HTML: salen del catalogo de gemini.js (verificado
+// contra la documentacion oficial) y, en cuanto se pulsa «Comprobar modelos
+// disponibles», de la lista REAL que devuelve la API para la key del usuario. Asi la
+// lista no se pudre con el tiempo: si Google publica un Flash nuevo, aparece solo.
 const modeloEl = document.getElementById('modelo-gemini');
-function actualizarUIModelo(){
-  modeloEl.querySelectorAll('.filtro').forEach(b => b.classList.toggle('on', b.dataset.modelo === geminiModelo));
+const modeloNota = document.getElementById('modelo-nota');
+
+function catalogoVisible(){
+  if (modelosDisponibles.length){
+    const set = new Set(modelosDisponibles);
+    const delCatalogo = MODELOS.filter(m => set.has(m.id));
+    const conocidos = new Set(MODELOS.map(m => m.id));
+    const nuevos = modelosDisponibles.filter(id => !conocidos.has(id))
+      .map(id => ({ id, etiqueta: id.replace(/^gemini-/, ''), nota: 'Publicado por Google después de esta versión' }));
+    if (delCatalogo.length || nuevos.length) return [...delCatalogo, ...nuevos];
+  }
+  return MODELOS;
 }
-actualizarUIModelo();
+
+function pintarModelos(){
+  const lista = catalogoVisible();
+  // Si el modelo guardado ya no esta en la lista, no se deja seleccionado un fantasma.
+  if (!lista.some(m => m.id === geminiModelo)){
+    geminiModelo = lista[0]?.id || MODELO_DEFECTO;
+    set('geminiModelo', geminiModelo);
+  }
+  modeloEl.innerHTML = lista.map(m =>
+    `<button class="filtro${m.id === geminiModelo ? ' on' : ''}" data-modelo="${m.id}">${m.etiqueta}</button>`
+  ).join('');
+  const actual = lista.find(m => m.id === geminiModelo);
+  modeloNota.textContent = actual ? `${actual.id} — ${actual.nota || ''}`.trim().replace(/ —\s*$/, '') : geminiModelo;
+}
+pintarModelos();
+
 modeloEl.addEventListener('click', (ev) => {
   const btn = ev.target.closest('.filtro');
   if (!btn) return;
   geminiModelo = btn.dataset.modelo;
   set('geminiModelo', geminiModelo);
-  actualizarUIModelo();
+  pintarModelos();
+});
+
+document.getElementById('btn-modelos').addEventListener('click', async () => {
+  const btn = document.getElementById('btn-modelos');
+  const nota = document.getElementById('modelos-estado');
+  const key = get('geminiKey', '') || inpGemini.value.trim();
+  nota.hidden = false;
+  if (!key){ nota.textContent = 'Pega primero tu API key en «Otros ajustes».'; return; }
+  btn.disabled = true; btn.textContent = 'Consultando a Google…';
+  try {
+    const r = await listarModelos(key);
+    if (!r.ok){ nota.textContent = r.mensaje; return; }
+    modelosDisponibles = r.modelos.map(m => m.id);
+    set('geminiModelosVistos', modelosDisponibles);
+    pintarModelos();
+    nota.textContent = r.mensaje + ' — la lista de arriba ya solo muestra esos.';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Comprobar modelos disponibles';
+  }
+});
+
+// --- Doble comprobacion ----------------------------------------------------
+function actualizarUIDoble(){
+  document.getElementById('doble-si').classList.toggle('on', dobleComprobacion);
+  document.getElementById('doble-no').classList.toggle('on', !dobleComprobacion);
+}
+actualizarUIDoble();
+document.getElementById('doble-si').addEventListener('click', () => {
+  dobleComprobacion = true; set('dobleComprobacion', true); actualizarUIDoble();
+  toast('Cada lectura con IA se contrastará con una segunda lectura');
+});
+document.getElementById('doble-no').addEventListener('click', () => {
+  dobleComprobacion = false; set('dobleComprobacion', false); actualizarUIDoble();
+  toast('Lectura simple — gasta la mitad de cuota, pero nada contrasta los datos');
 });
 
 // Conexión a Google Drive (Task 9)
@@ -1749,7 +1945,10 @@ let rvArchivo = null;
 
 // El panel de revision corrige la entrada igual que la tarjeta de captura (tipo Excel).
 Object.keys(RV_CAMPOS).forEach(id =>
-  document.getElementById(id).addEventListener('change', () => normalizarCampoEntrada(id)));
+  document.getElementById(id).addEventListener('change', () => {
+    normalizarCampoEntrada(id);
+    validarPanelRevision();
+  }));
 
 // Miniaturas del panel de revision: cache por sesion para no re-descargar de Drive.
 const thumbCache = new Map(); // archivo → Blob
@@ -1779,6 +1978,42 @@ document.getElementById('rv-thumb').addEventListener('click', () => {
   document.getElementById('visor').hidden = false;
 });
 
+// Resultado de la doble comprobacion de la ultima lectura hecha desde el panel.
+let rvConflictos = [], rvConfirmados = [], rvRncDescartado = null;
+
+// Realce defensivo: si OpenCV no esta listo (o falla) se devuelve el canvas original en
+// vez de dejar al usuario sin lectura. Nunca vale la pena romper una lectura por un filtro.
+function realceSeguro(canvas, modoRealce){
+  try { return aplicarRealce(canvas, { modo: modoRealce, intensidad: 65 }); }
+  catch(e){ console.error(e); return canvas; }
+}
+
+// Los mismos chequeos que la tarjeta de captura, sobre lo que hay ahora en el panel:
+// NCF con su largo exacto, RNC que no puede ser el mio, y montos que tienen que cuadrar.
+function validarPanelRevision(){
+  const num = v => normalizarMontoTexto(v);
+  const d = {};
+  for (const [id, campo] of Object.entries(RV_CAMPOS)){
+    const v = document.getElementById(id).value.trim();
+    d[campo] = RV_MONTOS.includes(campo) ? num(v) : v;
+  }
+  const chips = [], extra = [];
+  const diagNcf = ncfDiagnostico(d.ncf);
+  chips.push(diagNcf.ok ? okChip('NCF válido') : warnChip('NCF: ' + (diagNcf.motivo || 'a revisar')));
+  chips.push(normalizarFecha(d.fechaEmision) ? okChip('Fecha OK') : warnChip('Fecha a revisar'));
+  const propio = empresaGuardada().rnc;
+  if (propio && d.rncEmisor && mismoRnc(d.rncEmisor, propio)){
+    chips.push(warnChip('Ese RNC es el de TU empresa'));
+    extra.push('El RNC escrito es el de tu propia empresa (' + propio + '): en el 606 va el del PROVEEDOR que emite la factura.');
+  } else {
+    chips.push(rncValido(d.rncEmisor) ? okChip('RNC verificado') : warnChip('RNC a revisar'));
+  }
+  if (rvRncDescartado) extra.push('Se descartó el RNC ' + rvRncDescartado + ' porque es el de tu empresa: escribe el del comercio que emite.');
+  if (rvConfirmados.length) chips.push(okChip(`${rvConfirmados.length} campo(s) verificados x2`));
+  document.getElementById('rv-valid').innerHTML = chips.join('');
+  pintarAvisos(document.getElementById('rv-avisos'), rvConflictos, coherenciaMontos(d), extra);
+}
+
 function rellenarPanel(f){
   document.getElementById('revisar-titulo').textContent = `Revisar ${f.archivo}`;
   for (const [id, campo] of Object.entries(RV_CAMPOS)){
@@ -1790,6 +2025,7 @@ function rellenarPanel(f){
       : RV_MONTOS.includes(campo) ? formatearMonto(v)
       : v;
   }
+  validarPanelRevision();
 }
 
 function abrirRevisar(archivo){
@@ -1797,6 +2033,7 @@ function abrirRevisar(archivo){
   const f = idx?.facturas?.find(x => x.archivo === archivo);
   if (!f) return;
   rvArchivo = archivo;
+  rvConflictos = []; rvConfirmados = []; rvRncDescartado = null;
   rellenarPanel(f);
   const esCompleta = f.estado === 'completa';
   document.getElementById('rv-leer').hidden = esCompleta;
@@ -1880,11 +2117,31 @@ async function leerConIAAhora(motor = 'auto'){
     }
     if (!blob) return toast('No se encontró la imagen de la factura');
     const canvas = await archivoACanvas(blob);
+    // Fase 23: la imagen que baja de Drive llega tal cual se subio. Antes se le mandaba
+    // asi al modelo; ahora se le aplica el MISMO realce que en la captura (papel a blanco,
+    // tinta oscura) porque es lo que mejor lee, y el pase de verificacion recibe la
+    // version en grises — dos renders distintos del mismo documento.
+    const paraIA = realceSeguro(canvas, 'color');
+    const paraOCR = realceSeguro(canvas, 'grises');
     const key = get('geminiKey', '');
     const rncPropio = empresaGuardada().rnc;
-    let datos = null, motorUsado = null;
+    let datos = null, motorUsado = null, conflictos = [], confirmados = [];
     if (key && motor !== 'ocr'){
-      try { datos = await extraerDatos(canvas, key, geminiModelo, undefined, { rncCliente: rncPropio }); motorUsado = 'gemini'; }
+      try {
+        datos = await extraerDatos(paraIA, key, geminiModelo, undefined, { rncCliente: rncPropio });
+        motorUsado = 'gemini';
+        if (datos && dobleComprobacion){
+          btn.textContent = 'Comprobando…';
+          try {
+            const segunda = await verificarDatos(paraOCR, key, geminiModelo, undefined, { rncCliente: rncPropio });
+            const r = conciliarLecturas(datos, segunda);
+            datos = r.datos; conflictos = r.conflictos; confirmados = r.confirmados;
+          } catch(e){
+            console.error(e);
+            conflictos = [{ campo: null, texto: 'No se pudo hacer la segunda lectura — estos datos no están contrastados' }];
+          }
+        }
+      }
       catch(e){
         console.error(e);
         const diag = diagnosticoGemini(e.status);
@@ -1892,11 +2149,13 @@ async function leerConIAAhora(motor = 'auto'){
       }
     }
     if (!datos){
-      try { datos = await extraerDatosLocal(canvas, rncPropio); motorUsado = 'local'; }
+      try { datos = await extraerDatosLocal(paraOCR, rncPropio); motorUsado = 'local'; }
       catch(e){ console.error(e); }
     }
     if (!datos) return toast('Sin conexión y sin OCR disponible — intenta luego');
     datos = afinarDatosFactura(datos, { rncPropio }); // deduce el monto faltante y descarta el RNC propio
+    rvConflictos = conflictos; rvConfirmados = confirmados;
+    rvRncDescartado = datos.rncPropioDescartado || null;
     const res = await actualizarEntradaConReArchivo(ctx.mesId, archivo, f => {
       for (const c of ['fechaEmision', 'ncf', 'rncEmisor', 'nombreComercio', 'subtotal', 'propinaLegal', 'itbis', 'total']){
         if (datos[c] != null && datos[c] !== '') f[c] = datos[c];

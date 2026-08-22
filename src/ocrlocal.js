@@ -1,7 +1,11 @@
-import { ncfValido, normalizarFecha, normalizarMontoTexto } from './validacion.js';
+import { ncfValido, ncfTipoConocido, corregirNcf, ncfLargoEsperado, mismoRnc,
+         normalizarFecha, normalizarMontoTexto } from './validacion.js';
 
 // --- Patrones ---
-const RE_NCF_GLOBAL = /[BE]\d{2}\d{8,10}/gi;
+// Caracteres que pueden formar parte de un NCF tal como lo escupe el OCR: digitos y las
+// letras que solo pueden ser digitos mal leidos (corregirNcf las traduce).
+const RE_NCF_CUERPO = /^[BE]\d+$/;
+const ES_SERIE = c => 'BE83'.includes(c.toUpperCase());
 const RE_RNC_CONTEXTO = /rnc/i;
 const RE_CLIENTE = /cliente/i;
 const RE_EXCLUIR_FECHA = /v[aá]lido|vence|vencimiento|l[ií]mite|limite/i;
@@ -27,11 +31,59 @@ function aLineas(texto){
   return texto.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
 }
 
+// El OCR parte el NCF de mil formas: «B0100007133», «B01 0000 7133», «e-NCF:E31001169100»,
+// y encima confunde letras con digitos (O por 0, l por 1, S por 5). Fase 23: en vez de un
+// patron rigido, se recorre por TOKENS y dentro de cada token se prueba a arrancar en cada
+// posicion que podria ser la serie; luego se unen los tokens siguientes (si son numericos)
+// hasta alcanzar el largo oficial — 11 para la serie B, 13 para la E.
+//
+// Un candidato solo vale si, ya corregido, es la serie seguida SOLO de digitos: asi
+// «ELECTRONICO» (que empieza por E y cuyas letras son todas confundibles) no se cuela.
+// Y si el candidato arranca en un digito (un 8 leido como B, un 3 como E) se exige ademas
+// que dé el largo exacto: sin eso, cualquier importe que empiece por 3 seria un NCF.
+//
+// Se prefiere, en este orden: valido con tipo de la DGII conocido, valido a secas, y por
+// ultimo el mas largo — que aunque este mal hay que ENSEÑARLO, para que la validacion diga
+// que le sobra o le falta un digito. Esconderlo dejaria al usuario sin saber que corregir.
 function extraerNcf(texto){
-  const candidatos = texto.match(RE_NCF_GLOBAL) || [];
-  if (candidatos.length === 0) return null;
-  const valido = candidatos.find(c => ncfValido(c));
-  return (valido || candidatos[0]).toUpperCase();
+  const tokens = String(texto).split(/[\s|]+/).filter(Boolean)
+                              .map(t => t.replace(/[^A-Za-z0-9]/g, ''))
+                              .filter(Boolean);
+  const candidatos = [];
+  const proponer = (bruto, arrancaEnDigito) => {
+    const c = corregirNcf(bruto);
+    if (!c || c.length < 8 || !RE_NCF_CUERPO.test(c)) return null;
+    if (arrancaEnDigito && !ncfValido(c)) return null;
+    candidatos.push(c);
+    return c;
+  };
+  for (let i = 0; i < tokens.length; i++){
+    const tok = tokens[i];
+    for (let p = 0; p < tok.length; p++){
+      if (!ES_SERIE(tok[p])) continue;
+      const desdeAqui = tok.slice(p);
+      const enDigito = /\d/.test(tok[p]);
+      proponer(desdeAqui, enDigito);
+      // Unir hasta 3 tokens mas, y solo numericos: asi «B01 0000 7133» se rearma pero
+      // «B01 CAJA 3» no. Se para al llegar al largo oficial para no tragarse el importe
+      // que venga detras.
+      const serie = corregirNcf(desdeAqui);
+      if (!serie || !/^[BE]/.test(serie)) continue;
+      const esperado = ncfLargoEsperado(serie[0]);
+      let acumulado = desdeAqui;
+      for (let j = i + 1; j < tokens.length && j <= i + 3; j++){
+        const bruto = corregirNcf(acumulado) || '';
+        if (bruto.length >= esperado) break;
+        if (!/^[0-9OQDUILJZSGTYP]+$/i.test(tokens[j])) break;
+        acumulado += tokens[j];
+        proponer(acumulado, enDigito);
+      }
+    }
+  }
+  if (!candidatos.length) return null;
+  return candidatos.find(c => ncfValido(c) && ncfTipoConocido(c))
+      || candidatos.find(c => ncfValido(c))
+      || candidatos.reduce((a, b) => (b.length > a.length ? b : a));
 }
 
 function extraerFechaDeLinea(linea){
@@ -68,7 +120,8 @@ function extraerRncEmisor(lineas, rncPropio){
     if (!m) continue;
     const digitos = m[0].replace(/\D/g, '');
     if (digitos.length !== 9 && digitos.length !== 11) continue;
-    if (rncPropio && digitos === rncPropio) continue; // es el RNC del cliente, no del emisor
+    // Tambien cuando difiere en un solo digito confundible: es mi RNC mal leido.
+    if (rncPropio && mismoRnc(digitos, rncPropio)) continue; // es el del cliente, no del emisor
     return digitos;
   }
   return null;

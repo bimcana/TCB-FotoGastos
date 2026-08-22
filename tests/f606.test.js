@@ -201,3 +201,23 @@ test('repartoRevision: sin facturas no revienta y da totales en cero', () => {
 test('nombreRevision606: nombre propio, no se confunde con el TXT oficial', () => {
   assert.equal(nombreRevision606('Junio 2026'), 'Revision_606_Junio_2026.xlsx');
 });
+
+// --- Fase 23: la propina sale del monto que se declara ---------------------
+// Fila real del TXT de la contabilidad de junio 2026:
+//   131067603|1|02|E310000025067||20260606||4940.01||4940.01|889.2|...|494|01
+// El recibo cobro 4940.01 + 889.20 (ITBIS 18%) + 494.00 (propina 10%) = 6323.21.
+// Sin subtotal impreso, la app declaraba 6323.21 - 889.20 = 5434.01: un 10% de mas
+// en la columna del 606, en TODAS las facturas de restaurante.
+test('montoFacturado: sin subtotal impreso, la propina NO se declara', () => {
+  assert.equal(montoFacturado({ total: 6323.21, itbis: 889.20, propinaLegal: 494 }), 4940.01);
+  // Con subtotal impreso manda el subtotal, como siempre.
+  assert.equal(montoFacturado({ subtotal: 4940.01, total: 6323.21, itbis: 889.20, propinaLegal: 494 }), 4940.01);
+  // Sin propina, el comportamiento de siempre.
+  assert.equal(montoFacturado({ total: 1363.49, itbis: 151.04 }), 1212.45);
+  assert.equal(montoFacturado({ total: 118 }), 118);
+  assert.equal(montoFacturado({}), null);
+});
+
+test('montoFacturado: solo total y propina (rollo de restaurante sin ITBIS impreso)', () => {
+  assert.equal(montoFacturado({ total: 1100, propinaLegal: 100 }), 1000);
+});

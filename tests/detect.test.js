@@ -2,7 +2,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { ordenarEsquinas, esEstable, dimensionesDestino, cuadrilateroValido, areaCuadrilatero, boundingBox, escalaTrabajo,
          mapearEsquinas, tocaBorde, recorteConfiable, angulosInternos, ladosOpuestosParecidos,
-         bordesLaterales, extenderLateralesAlMarco, marcoCompleto, esCasiElEncuadre } from '../src/detect.js';
+         bordesLaterales, extenderLateralesAlMarco, marcoCompleto, esCasiElEncuadre,
+         MAX_PIXELES_ORTO } from '../src/detect.js';
 
 // --- Fase 11: guardas calibradas con las 61 fotos reales ---
 
@@ -200,4 +201,20 @@ test('bounding box de un cuadrilatero inclinado', () => {
 test('bounding box nunca tiene ancho/alto cero', () => {
   const bb = boundingBox([{x:10,y:10},{x:10,y:10},{x:10,y:10},{x:10,y:10}]);
   assert.ok(bb.w >= 1 && bb.h >= 1);
+});
+
+// --- Fase 23: tope de pixeles de la ortofoto -------------------------------
+// La foto pasa entera por OpenCV.js (warp + autoColor), que corre sobre un heap WASM
+// acotado. Con la camara a mayor resolucion, una factura muy grande podria pedir una
+// ortofoto de decenas de MP y tumbar el procesado justo al capturar.
+test('dimensionesDestino: una ortofoto enorme se limita conservando la proporcion', () => {
+  const esq = [{x:0,y:0}, {x:6000,y:0}, {x:6000,y:8000}, {x:0,y:8000}]; // 48 MP
+  const d = dimensionesDestino(esq);
+  assert.ok(d.w * d.h <= MAX_PIXELES_ORTO + 1, 'no supera el tope');
+  assert.ok(Math.abs((d.h / d.w) - (8000 / 6000)) < 0.01, 'la proporcion se conserva');
+});
+
+test('dimensionesDestino: por debajo del tope no toca nada', () => {
+  const esq = [{x:0,y:0}, {x:900,y:0}, {x:900,y:3500}, {x:0,y:3500}]; // 3.15 MP, un rollo real
+  assert.deepEqual(dimensionesDestino(esq), { w: 900, h: 3500 });
 });

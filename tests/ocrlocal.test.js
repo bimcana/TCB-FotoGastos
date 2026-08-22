@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { parsearTextoFactura } from '../src/ocrlocal.js';
+import { ncfValido } from '../src/validacion.js';
 
 const ticket = `SOLUCIONES AUTOMOTRICES SA
 RNC: 124028663
@@ -228,4 +229,51 @@ RNC 131000000
 NCF B0100000123
 TOTAL RD$ 850.00`;
   assert.equal(parsearTextoFactura(t).nombreComercio, 'FARMACIA LA ECONOMICA SRL');
+});
+
+// --- Fase 23: el NCF del OCR se rearma y se mide -----------------------------
+// El OCR parte el comprobante en trozos y confunde letras con digitos. Antes bastaba
+// con que "pareciera" un NCF; ahora se rearma por tokens y el largo oficial manda.
+test('NCF partido en grupos por el OCR se rearma', () => {
+  assert.equal(parsearTextoFactura('COMERCIO X\nNCF: B01 0000 7133\nTOTAL 3,050.00').ncf, 'B0100007133');
+  assert.equal(parsearTextoFactura('COMERCIO X\nNCF B01-0000-7133\nTOTAL 100').ncf, 'B0100007133');
+});
+
+test('NCF con letras que solo pueden ser digitos (O por 0, l por 1)', () => {
+  assert.equal(parsearTextoFactura('COMERCIO X\nNCF: B0lOOOO7133\nTOTAL 100').ncf, 'B0100007133');
+});
+
+test('el NCF no se traga el numero que viene detras', () => {
+  // «B01 0000 7133 3050»: al llegar a 11 caracteres se para. Antes un patron avido
+  // se llevaba el importe y devolvia un comprobante imposible.
+  assert.equal(parsearTextoFactura('X\nNCF B01 0000 7133 3050\nTOTAL 3,050.00').ncf, 'B0100007133');
+});
+
+test('una palabra que empieza por E no se confunde con un e-NCF', () => {
+  // "ELECTRONICO": empieza por E y TODAS sus letras son confundibles con digitos.
+  assert.equal(parsearTextoFactura('COMERCIO X\nFACTURA ELECTRONICO\nTOTAL 100').ncf, null);
+});
+
+test('un importe que empieza por 3 u 8 no se convierte en NCF', () => {
+  assert.equal(parsearTextoFactura('COMERCIO X\nTOTAL 3,050.00').ncf, null);
+  assert.equal(parsearTextoFactura('COMERCIO X\nTOTAL 850.00\nCAJA 38129').ncf, null);
+});
+
+test('un 8 leido donde iba la B se corrige solo si da el largo exacto', () => {
+  assert.equal(parsearTextoFactura('X\nNCF 80100007133\nTOTAL 100').ncf, 'B0100007133');
+});
+
+test('un NCF con un digito de mas se DEVUELVE (no se esconde) para poder corregirlo', () => {
+  const d = parsearTextoFactura('X\nNCF: B01000071330\nTOTAL 100');
+  assert.equal(d.ncf, 'B01000071330');
+  assert.equal(ncfValido(d.ncf), false, 'y la validacion lo marca');
+});
+
+// --- Fase 23: mi propio RNC nunca sale como emisor, ni mal leido ------------
+test('el OCR local descarta mi RNC aunque venga con un digito confundido', () => {
+  const t = 'COMERCIO X\nRNC 133231624\nTOTAL 100';   // el propio es 133231824
+  assert.equal(parsearTextoFactura(t, { rncPropio: '133231824' }).rncEmisor, null);
+  // El de un proveedor de verdad sigue pasando.
+  const t2 = 'COMERCIO X\nRNC 101796822\nTOTAL 100';
+  assert.equal(parsearTextoFactura(t2, { rncPropio: '133231824' }).rncEmisor, '101796822');
 });

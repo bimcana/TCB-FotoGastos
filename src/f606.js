@@ -23,12 +23,20 @@ export function tipoId(rnc){
   return d.length === 11 ? 2 : 1; // 2 = cedula (11 digitos); 1 = RNC (9)
 }
 
-// Monto facturado SIN ITBIS. Si la factura no trae subtotal (tipico de supermercados y
-// gasolineras), se deduce como total - itbis; si tampoco hay ITBIS, el total es el monto.
+// Monto facturado: lo que se declara en la columna del 606. Es el importe SIN ITBIS y
+// SIN PROPINA. Si la factura no trae subtotal (tipico de supermercados, gasolineras y
+// restaurantes de rollo), se deduce del total a pagar restando las dos cosas.
+//
+// Fase 23 — la propina faltaba en esta resta. Fila real del TXT de la contabilidad:
+//   E310000025067 -> monto 4940.01 | ITBIS 889.20 (18%) | propina 494.00 (10%)
+// El recibo cobra 6323.21. Sin subtotal impreso, la app declaraba 6323.21 - 889.20 =
+// 5434.01 en vez de 4940.01: un 10% de mas en el 606, en TODOS los restaurantes.
 export function montoFacturado(f){
   if (typeof f.subtotal === 'number') return f.subtotal;
-  if (typeof f.total === 'number' && typeof f.itbis === 'number') return +(f.total - f.itbis).toFixed(2);
-  return typeof f.total === 'number' ? f.total : null;
+  const propina = (typeof f.propinaLegal === 'number' && f.propinaLegal > 0) ? f.propinaLegal : 0;
+  if (typeof f.total !== 'number') return null;
+  const itbis = (typeof f.itbis === 'number') ? f.itbis : 0;
+  return +(f.total - itbis - propina).toFixed(2);
 }
 
 export function filas606(facturas, periodo){

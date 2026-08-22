@@ -599,3 +599,19 @@ html[data-theme="light"] #batch-count{color:#16202B}
 .acc-accion{ width:78px; border:none; color:#fff; font-family:inherit; font-size:12px; font-weight:700; cursor:pointer; }
 .acc-accion.archivar{ background:#3A6EA5; }
 .acc-accion.eliminar{ background:#C0392B; }
+
+
+/* Avisos de lectura (Fase 23): lo que la doble comprobación o la aritmética no cuadran.
+   No bloquean nada — señalan el campo exacto que hay que mirar antes de confirmar. */
+.avisos{display:flex; flex-direction:column; gap:6px; margin:9px 0 2px}
+.avisos[hidden]{display:none}
+.aviso{
+  display:flex; gap:8px; align-items:flex-start;
+  font-size:12px; line-height:1.35; padding:7px 9px; border-radius:8px;
+  color:#EFC57E; background:rgba(224,166,63,.1); border:1px solid rgba(224,166,63,.34);
+}
+.aviso .aviso-campo{font-weight:700; text-transform:uppercase; letter-spacing:.03em; font-size:10.5px; padding-top:1px; white-space:nowrap}
+.aviso.conflicto{color:#F1A08F; background:rgba(214,69,51,.09); border-color:rgba(214,69,51,.34)}
+.aviso b{font-variant-numeric:tabular-nums}
+html[data-theme="light"] .aviso{color:#8F6400; background:rgba(224,166,63,.12); border-color:rgba(224,166,63,.45)}
+html[data-theme="light"] .aviso.conflicto{color:#A63A2C; background:rgba(214,69,51,.08); border-color:rgba(214,69,51,.4)}
